@@ -1,7 +1,9 @@
 package yaml
 
 import (
-	"strconv"
+	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/imdario/mergo"
 	log "github.com/sirupsen/logrus"
@@ -10,80 +12,93 @@ import (
 //Resolve takes an array of yaml maps and returns a single map of a merged
 //properties.  The order of `ymlTemplates` matters, it should go from lowest
 //to highest precendence.
-func Resolve(ymlTemplates []map[string]interface{}, envKeyPairs []string) map[string]string {
+func Resolve(ymlTemplates []map[interface{}]interface{}, envKeyPairs []string) (map[string]interface{}, error) {
 	log.Debugf("Using environ %+v\n", envKeyPairs)
 
-	mergeMap := map[string]interface{}{}
-
+	mergedMap := map[interface{}]interface{}{}
 	for _, yml := range ymlTemplates {
-		if err := mergo.Merge(&mergeMap, yml); err != nil {
+		if err := mergo.Merge(&mergedMap, yml); err != nil {
 			log.Error(err)
 		}
 	}
 
-	flatMap := map[string]string{}
-	//we flatten the map to easily lookup keys
-	flatten(true, flatMap, ymlTemplates[0], "")
+	stringMap := convertToStringMap(mergedMap)
+	envMap := map[string]string{}
+	for _, envKeyPair := range envKeyPairs {
+		keyPair := strings.Split(envKeyPair, "=")
+		envMap[keyPair[0]] = keyPair[1]
+	}
 
-	return flatMap
-	//  keep_resolving = True
-	//  loops = 0
-	//  while keep_resolving and loops < len(flattened):
-	// 		 loops += 1
-	// 		 keep_resolving = False
-	// 		 for key, value in flattened.items():
-	// 				 keys_to_resolve = re.findall("\$\{(.*?)\}", str(value))
-	// 				 if len(keys_to_resolve) > 0: keep_resolving = True
-	// 				 resolved_keys = _resolve_key_substition(flattened, keys_to_resolve)
-	// 				 for sub_key, resolved_key in resolved_keys:
-	// 						 flattened[key] = flattened[key].replace(
-	// 												 "${%s}" % sub_key, str(resolved_key))
-	//  return flattened
-
+	subValues(stringMap, stringMap, envMap)
+	return stringMap, nil
 }
 
-func flatten(top bool, flatMap map[string]string, nested interface{}, prefix string) error {
-	assign := func(newKey string, v interface{}) error {
+func convertToStringMap(m map[interface{}]interface{}) map[string]interface{} {
+	newMap := map[string]interface{}{}
+	for k, v := range m {
 		switch v.(type) {
-		case map[string]interface{}, []interface{}, map[interface{}]interface{}:
-			if err := flatten(false, flatMap, v, newKey); err != nil {
-				return err
-			}
+		case map[interface{}]interface{}:
+			stringMap := convertToStringMap(v.(map[interface{}]interface{}))
+			newMap[k.(string)] = stringMap
 		default:
-			flatMap[newKey] = v.(string)
-		}
-
-		return nil
-	}
-
-	switch nested.(type) {
-	case map[string]interface{}:
-		for k, v := range nested.(map[string]interface{}) {
-			newKey := enkey(top, prefix, k)
-			assign(newKey, v)
-		}
-	case map[interface{}]interface{}:
-		for k, v := range nested.(map[interface{}]interface{}) {
-			newKey := enkey(top, prefix, k.(string))
-			assign(newKey, v)
-		}
-	case []interface{}:
-		for i, v := range nested.([]interface{}) {
-			newKey := enkey(top, prefix, strconv.Itoa(i))
-			assign(newKey, v)
+			newMap[k.(string)] = fmt.Sprintf("%v", v)
 		}
 	}
-
-	return nil
+	return newMap
 }
 
-func enkey(top bool, prefix, subkey string) string {
-	key := prefix
-
-	if top {
-		key += subkey
-	} else {
-		key += "." + subkey
+func subValues(fullMap map[string]interface{}, subMap map[string]interface{}, env map[string]string) {
+	keepResolving := true
+	loops := 0
+	re := regexp.MustCompile("\\$\\{(.*?)\\}")
+	for keepResolving && loops < len(subMap) {
+		loops++
+		for k, value := range subMap {
+			switch value.(type) {
+			case map[string]interface{}:
+				subValues(fullMap, value.(map[string]interface{}), env)
+			case string:
+				valStr := value.(string)
+				keys := re.FindAllStringSubmatch(valStr, -1)
+				for _, keyToSub := range keys {
+					resolvedValue := resolveSubs(fullMap, keyToSub[1], env)
+					subMap[k] = strings.Replace(valStr, "${"+keyToSub[1]+"}", resolvedValue, -1)
+				}
+			}
+		}
 	}
-	return key
+}
+
+func resolveSubs(m map[string]interface{}, keyToSub string, env map[string]string) string {
+	//this function returns array of tuples with their substituted values
+	//this handles the case of multiple substitutions in a value
+	//baseUrl: ${services.default.protocol}://${services.echo.host}:${services.echo.port}
+	keyDefaultSplit := strings.Split(keyToSub, ":")
+	subKey, defaultKey := keyDefaultSplit[0], keyDefaultSplit[0]
+	if len(keyDefaultSplit) == 2 {
+		defaultKey = keyDefaultSplit[1]
+	}
+
+	if v := valueFromFlatKey(subKey, m); v != "" {
+		defaultKey = v
+	} else if v, ok := env[subKey]; ok {
+		defaultKey = v
+	}
+
+	return defaultKey
+}
+
+func valueFromFlatKey(flatKey string, m map[string]interface{}) string {
+	keys := strings.Split(flatKey, ".")
+	for _, key := range keys {
+		switch m[key].(type) {
+		case map[string]interface{}:
+			m = m[key].(map[string]interface{})
+		case string:
+			return m[key].(string)
+		default:
+			continue
+		}
+	}
+	return ""
 }
