@@ -33,4 +33,4 @@ variables
 SPRING_PROFILES_ACTIVE="armory,local"
 ```
 
-The `configDir` is where the configuration files live, tpyically `/opt/spinnaker/config` for Spinnaker files.
+The `configDir` is where the configuration files live, typically `/opt/spinnaker/config` for Spinnaker files.
