@@ -1,3 +1,5 @@
+[![Coverage Status](https://coveralls.io/repos/github/Armory/go-yaml-tools/badge.svg?branch=master)](https://coveralls.io/github/Armory/go-yaml-tools?branch=master)
+
 ## Go implementation of this library:
 
 https://github.com/armory-io/yaml-tools/blob/master/yamltools/resolver.py
