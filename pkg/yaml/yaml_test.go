@@ -74,10 +74,10 @@ func TestResolver(t *testing.T) {
 	for _, f := range fileNames {
 		ymlMaps = append(ymlMaps, readTestFixtures(t, f))
 	}
-	envKeyPairs := []string{
-		"SPINNAKER_AWS_ENABLED=true",
-		"DEFAULT_DNS_NAME=mockdns.com",
-		"REDIS_HOST=redishost.com",
+	envKeyPairs := map[string]string{
+		"SPINNAKER_AWS_ENABLED": "true",
+		"DEFAULT_DNS_NAME":      "mockdns.com",
+		"REDIS_HOST":            "redishost.com",
 	}
 
 	resolved, err := Resolve(ymlMaps, envKeyPairs)

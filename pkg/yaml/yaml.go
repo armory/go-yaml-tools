@@ -12,7 +12,7 @@ import (
 //Resolve takes an array of yaml maps and returns a single map of a merged
 //properties.  The order of `ymlTemplates` matters, it should go from lowest
 //to highest precendence.
-func Resolve(ymlTemplates []map[interface{}]interface{}, envKeyPairs []string) (map[string]interface{}, error) {
+func Resolve(ymlTemplates []map[interface{}]interface{}, envKeyPairs map[string]string) (map[string]interface{}, error) {
 	log.Debugf("Using environ %+v\n", envKeyPairs)
 
 	mergedMap := map[interface{}]interface{}{}
@@ -23,13 +23,8 @@ func Resolve(ymlTemplates []map[interface{}]interface{}, envKeyPairs []string) (
 	}
 
 	stringMap := convertToStringMap(mergedMap)
-	envMap := map[string]string{}
-	for _, envKeyPair := range envKeyPairs {
-		keyPair := strings.Split(envKeyPair, "=")
-		envMap[keyPair[0]] = keyPair[1]
-	}
 
-	subValues(stringMap, stringMap, envMap)
+	subValues(stringMap, stringMap, envKeyPairs)
 	return stringMap, nil
 }
 
@@ -48,6 +43,7 @@ func convertToStringMap(m map[interface{}]interface{}) map[string]interface{} {
 }
 
 func subValues(fullMap map[string]interface{}, subMap map[string]interface{}, env map[string]string) {
+	//responsible for finding all variables that need to be substituted
 	keepResolving := true
 	loops := 0
 	re := regexp.MustCompile("\\$\\{(.*?)\\}")
