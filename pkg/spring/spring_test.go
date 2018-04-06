@@ -18,6 +18,4 @@ func TestSubValues(t *testing.T) {
 	spinnaker := props["spinnaker"].(map[string]interface{})
 	assert.Equal(t, "false", spinnaker["armory"])
 	assert.Equal(t, "true", spinnaker["default"])
-	assert.Equal(t, "http://mockapihost.com", spinnaker["API_HOST"])
-
 }
