@@ -8,7 +8,7 @@ import (
 
 	yamlParse "gopkg.in/yaml.v2"
 
-	"github.com/Armory/go-yaml-tools/pkg/yaml"
+	"github.com/armory/go-yaml-tools/pkg/yaml"
 	log "github.com/sirupsen/logrus"
 )
 

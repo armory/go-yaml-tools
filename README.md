@@ -1,4 +1,4 @@
-[![Coverage Status](https://coveralls.io/repos/github/Armory/go-yaml-tools/badge.svg?branch=master)](https://coveralls.io/github/Armory/go-yaml-tools?branch=master)
+[![Coverage Status](https://coveralls.io/repos/github/armory/go-yaml-tools/badge.svg?branch=master)](https://coveralls.io/github/armory/go-yaml-tools?branch=master)
 
 ## Go implementation of this library:
 
