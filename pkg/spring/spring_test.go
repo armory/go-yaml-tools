@@ -17,7 +17,6 @@ func TestSubValues(t *testing.T) {
 	envPairs := []string{"SPRING_PROFILES_ACTIVE=armory,local"}
 	props, _ := LoadProperties(propNames, configDir, envPairs)
 	spinnaker := props["spinnaker"].(map[string]interface{})
-	fmt.Println(spinnaker)
 	assert.Equal(t, "false", spinnaker["armory"])
 	assert.Equal(t, "true", spinnaker["default"])
 }
