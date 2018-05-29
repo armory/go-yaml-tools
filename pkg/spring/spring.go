@@ -71,7 +71,7 @@ func LoadProperties(propNames []string, configDir string, envKeyPairs []string) 
 // LoadDefault will use the following defaults:
 //
 // Check for the following config locations:
-// 	1. /opt/spinnaker/config
+//  1. /opt/spinnaker/config
 //  2. /home/spinnaker/config
 //  3. /root/config
 // Profiles:
