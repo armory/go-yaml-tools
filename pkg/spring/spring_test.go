@@ -35,7 +35,6 @@ spinnaker:
 	fs = mockFs
 	props, err := LoadDefault([]string{"spinnaker"})
 	assert.Nil(t, err)
-	fmt.Println("props", props)
 	spinnaker := props["spinnaker"].(map[string]interface{})
 	assert.Equal(t, "false", spinnaker["something"])
 }
