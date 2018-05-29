@@ -1,21 +1,26 @@
 package spring
 
 import (
+	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/afero"
 	yamlParse "gopkg.in/yaml.v2"
 
 	"github.com/armory/go-yaml-tools/pkg/yaml"
-	log "github.com/sirupsen/logrus"
 )
+
+// Use afero to create an abstraction layer between our package and the
+// OS's file system. This will allow us to test our package.
+var fs = afero.NewOsFs()
 
 func loadConfig(configFile string) map[interface{}]interface{} {
 	s := map[interface{}]interface{}{}
-	if _, err := os.Stat(configFile); err == nil {
-		bytes, err := ioutil.ReadFile(configFile)
+	if _, err := fs.Stat(configFile); err == nil {
+		bytes, err := afero.ReadFile(fs, configFile)
 		if err != nil {
 			log.Errorf("Unable to open config file %s: %v", configFile, err)
 			return nil
@@ -34,29 +39,84 @@ func loadConfig(configFile string) map[interface{}]interface{} {
 //LoadProperties tries to do what spring properties manages by loading files
 //using the right precendence and returning a merged map that contains all the
 //keys and their values have been substituted for the correct value
+//
+//Usage:
+//  If you want to load the following files:
+//    - spinnaker.yml
+//    - spinnaker-local.yml
+//    - gate-local.yml
+//    - gate-armory.yml
+// Then For propNames you would give:
+//	  ["spinnaker", "gate"]
+// and you'll need to make sure your envKeyPairs has the following key pair as one of it's variables
+//    SPRING_PROFILES_ACTIVE="armory,local"
 func LoadProperties(propNames []string, configDir string, envKeyPairs []string) (map[string]interface{}, error) {
-	envMap := map[string]string{}
-	for _, envKeyPair := range envKeyPairs {
-		keyPair := strings.Split(envKeyPair, "=")
-		envMap[keyPair[0]] = keyPair[1]
-	}
-
+	envMap := keyPairToMap(envKeyPairs)
 	profStr := envMap["SPRING_PROFILES_ACTIVE"]
 	profs := strings.Split(profStr, ",")
+	return loadProperties(propNames, configDir, profs, envMap)
+}
 
+// LoadDefault will use the following defaults:
+//
+// Check for the following config locations:
+// 	1. /opt/spinnaker/config
+//  2. /home/spinnaker/config
+//  3. /root/config
+// Profiles:
+//  - armory
+//  - local
+// Env:
+//  Pulls os.Environ()
+//
+// Specify propNames in the same way as LoadProperties().
+func LoadDefault(propNames []string) (map[string]interface{}, error) {
+	profiles := []string{"armory", "local"}
+	dir := configDirectory()
+	if dir == "" {
+		return nil, errors.New("could not find config directory")
+	}
+	env := keyPairToMap(os.Environ())
+	return loadProperties(propNames, dir, profiles, env)
+}
+
+func keyPairToMap(keyPairs []string) map[string]string {
+	m := map[string]string{}
+	for _, keyPair := range keyPairs {
+		split := strings.Split(keyPair, "=")
+		m[split[0]] = split[1]
+	}
+	return m
+}
+
+func configDirectory() string {
+	confDirs := []string{
+		"/opt/spinnaker/config",
+		"/home/spinnaker/config",
+		"/root/config",
+	}
+	for _, dir := range confDirs {
+		if _, err := fs.Stat(dir); err == nil {
+			return dir
+		}
+	}
+	return ""
+}
+
+func loadProperties(propNames []string, confDir string, profiles []string, envMap map[string]string) (map[string]interface{}, error) {
 	propMaps := []map[interface{}]interface{}{}
 	//first load the main props, i.e. gate.yaml with no profile extensions
 	for _, prop := range propNames {
-		filePath := fmt.Sprintf("%s/%s.yml", configDir, prop)
+		filePath := fmt.Sprintf("%s/%s.yml", confDir, prop)
 		propMaps = append(propMaps, loadConfig(filePath))
 	}
 
 	for _, prop := range propNames {
 		//we traverse the profiles array backwards for correct precedence
-		for i := len(profs) - 1; i >= 0; i-- {
-			p := profs[i]
+		for i := len(profiles) - 1; i >= 0; i-- {
+			p := profiles[i]
 			pTrim := strings.TrimSpace(p)
-			filePath := fmt.Sprintf("%s/%s-%s.yml", configDir, prop, pTrim)
+			filePath := fmt.Sprintf("%s/%s-%s.yml", confDir, prop, pTrim)
 			propMaps = append(propMaps, loadConfig(filePath))
 		}
 	}
