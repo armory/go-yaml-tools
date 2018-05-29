@@ -13,6 +13,17 @@ import (
 	"github.com/armory/go-yaml-tools/pkg/yaml"
 )
 
+var defaultConfigDirs = []string{
+	"/opt/spinnaker/config",
+	"/home/spinnaker/config",
+	"/root/config",
+}
+
+var defaultProfiles = []string{
+	"armory",
+	"local",
+}
+
 // Use afero to create an abstraction layer between our package and the
 // OS's file system. This will allow us to test our package.
 var fs = afero.NewOsFs()
@@ -94,16 +105,11 @@ func profiles() []string {
 	if len(s) > 0 {
 		return strings.Split(s, ",")
 	}
-	return []string{"armory", "local"}
+	return defaultProfiles
 }
 
 func configDirectory() string {
-	confDirs := []string{
-		"/opt/spinnaker/config",
-		"/home/spinnaker/config",
-		"/root/config",
-	}
-	for _, dir := range confDirs {
+	for _, dir := range defaultConfigDirs {
 		if _, err := fs.Stat(dir); err == nil {
 			return dir
 		}
