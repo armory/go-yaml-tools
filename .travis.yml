@@ -7,4 +7,5 @@ before_install:
   - dep ensure
   - go get github.com/mattn/goveralls
 script:
-  - $GOPATH/bin/goveralls -service=travis-ci
+  # - $GOPATH/bin/goveralls -service=travis-ci
+  - go test -v ./...
