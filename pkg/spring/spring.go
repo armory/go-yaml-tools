@@ -71,13 +71,13 @@ func LoadProperties(propNames []string, configDir string, envKeyPairs []string) 
 //
 // Specify propNames in the same way as LoadProperties().
 func LoadDefault(propNames []string) (map[string]interface{}, error) {
-	profiles := []string{"armory", "local"}
+	profs := profiles()
 	dir := configDirectory()
 	if dir == "" {
 		return nil, errors.New("could not find config directory")
 	}
 	env := keyPairToMap(os.Environ())
-	return loadProperties(propNames, dir, profiles, env)
+	return loadProperties(propNames, dir, profs, env)
 }
 
 func keyPairToMap(keyPairs []string) map[string]string {
@@ -87,6 +87,14 @@ func keyPairToMap(keyPairs []string) map[string]string {
 		m[split[0]] = split[1]
 	}
 	return m
+}
+
+func profiles() []string {
+	s := os.Getenv("SPRING_PROFILES_ACTIVE")
+	if len(s) > 0 {
+		return strings.Split(s, ",")
+	}
+	return []string{"armory", "local"}
 }
 
 func configDirectory() string {
