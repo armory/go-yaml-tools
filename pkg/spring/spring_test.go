@@ -10,7 +10,7 @@ import (
 
 func TestSubValues(t *testing.T) {
 	wd, _ := os.Getwd()
-	configDir := fmt.Sprintf("%s/../../test/springconf/", wd)
+	configDir := fmt.Sprintf("%s/../../test/springconf", wd)
 
 	propNames := []string{"spinnaker", "gate"}
 	envPairs := []string{"SPRING_PROFILES_ACTIVE=armory,local"}
