@@ -38,3 +38,7 @@ spinnaker:
 	spinnaker := props["spinnaker"].(map[string]interface{})
 	assert.Equal(t, "false", spinnaker["something"])
 }
+
+func TestConfigDirs(t *testing.T) {
+	assert.Equal(t, len(defaultConfigDirs), 4)
+}
