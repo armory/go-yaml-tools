@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
+	"path/filepath"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -13,15 +15,24 @@ import (
 	"github.com/armory/go-yaml-tools/pkg/yaml"
 )
 
-var defaultConfigDirs = []string{
-	"/opt/spinnaker/config",
-	"/home/spinnaker/config",
-	"/root/config",
-}
+var defaultConfigDirs = buildConfigDirs()
 
 var defaultProfiles = []string{
 	"armory",
 	"local",
+}
+
+func buildConfigDirs() []string {
+	paths := []string{
+		"/opt/spinnaker/config",
+		"/home/spinnaker/config",
+		"/root/config",
+	}
+	usr, err := user.Current()
+	if err == nil {
+		paths = append(paths, filepath.Join(usr.HomeDir, ".spinnaker"))
+	}
+	return paths
 }
 
 // Use afero to create an abstraction layer between our package and the
@@ -74,6 +85,7 @@ func LoadProperties(propNames []string, configDir string, envKeyPairs []string) 
 //  1. /opt/spinnaker/config
 //  2. /home/spinnaker/config
 //  3. /root/config
+//  4. HOME_DIR/.spinnaker
 // Profiles:
 //  - armory
 //  - local
