@@ -24,8 +24,9 @@ var defaultProfiles = []string{
 
 func buildConfigDirs() []string {
 	paths := []string{
-		"/opt/spinnaker/config",
+		// The order matters.
 		"/home/spinnaker/config",
+		"/opt/spinnaker/config",
 		"/root/config",
 	}
 	usr, err := user.Current()
