@@ -140,7 +140,8 @@ func loadProperties(propNames []string, confDir string, profiles []string, envMa
 
 	for _, prop := range propNames {
 		//we traverse the profiles array backwards for correct precedence
-		for i := len(profiles) - 1; i >= 0; i-- {
+		//for i := len(profiles) - 1; i >= 0; i-- {
+		for i := range profiles {
 			p := profiles[i]
 			pTrim := strings.TrimSpace(p)
 			filePath := fmt.Sprintf("%s/%s-%s.yml", confDir, prop, pTrim)

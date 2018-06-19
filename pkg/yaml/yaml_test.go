@@ -65,9 +65,9 @@ func readTestFixtures(t *testing.T, fileName string) map[interface{}]interface{}
 func TestResolver(t *testing.T) {
 
 	fileNames := []string{
+		"spinnaker.yml",
 		"spinnaker-armory.yml",
 		"spinnaker-local.yml",
-		"spinnaker.yml",
 	}
 
 	ymlMaps := []map[interface{}]interface{}{}
@@ -96,7 +96,7 @@ func TestResolver(t *testing.T) {
 
 	//default when no ENV var is present
 	defaultRegion := providers["aws"].(map[string]interface{})["defaultRegion"]
-	assert.Equal(t, "us-west-2", defaultRegion)
+	assert.Equal(t, "us-east-1", defaultRegion)
 
 	//more complex substitution with urls
 	fiatURL := services["fiat"].(map[string]interface{})["baseUrl"]

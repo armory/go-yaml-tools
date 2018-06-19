@@ -17,11 +17,11 @@ func Resolve(ymlTemplates []map[interface{}]interface{}, envKeyPairs map[string]
 
 	mergedMap := map[interface{}]interface{}{}
 	for _, yml := range ymlTemplates {
-		if err := mergo.Merge(&mergedMap, yml); err != nil {
+		if err := mergo.Merge(&mergedMap, yml, mergo.WithOverride); err != nil {
 			log.Error(err)
 		}
 	}
-
+	fmt.Println(mergedMap)
 	stringMap := convertToStringMap(mergedMap)
 
 	subValues(stringMap, stringMap, envKeyPairs)

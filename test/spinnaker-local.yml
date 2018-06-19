@@ -40,7 +40,7 @@ services:
     # Individual systems can still be overridden using their own section entry
     # directly under 'services'.
     protocol: http    # Assume all spinnaker subsystems are using http
-    host: localhost   # Assume all spinnaker subsystems are on localhost
+    # host: localhost   # Assume all spinnaker subsystems are on localhost
 
   redis:
     # If you are using a remote redis server, you can set the host here.
