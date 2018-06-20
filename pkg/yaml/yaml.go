@@ -21,7 +21,6 @@ func Resolve(ymlTemplates []map[interface{}]interface{}, envKeyPairs map[string]
 			log.Error(err)
 		}
 	}
-	fmt.Println(mergedMap)
 	stringMap := convertToStringMap(mergedMap)
 
 	subValues(stringMap, stringMap, envKeyPairs)
