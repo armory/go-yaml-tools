@@ -2,10 +2,10 @@ package spring
 
 import (
 	"fmt"
-	"github.com/mitchellh/mapstructure"
 	"os"
 	"testing"
 
+	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 )
@@ -44,12 +44,12 @@ func TestDefaultsWithMultipleProfiles(t *testing.T) {
 	mockSpinnakerFile := `
 services:
   front50:
-    storage_bucket: mybucket2
+    storageBucket: mybucket2
 `
 	mockSpinnakerArmoryFile := `
 services:
   front50:
-    storage_bucket: mybucket
+    storageBucket: mybucket
 `
 	mockFs := afero.NewMemMapFs()
 	mockFs.MkdirAll("/home/spinnaker/config", 0755)
@@ -67,7 +67,7 @@ services:
 	type yaml struct {
 		Services struct {
 			Front50 struct {
-				Bucket string `json:"storage_bucket" mapstructure:"storage_bucket"`
+				Bucket string `json:"storageBucket" mapstructure:"storageBucket"`
 			} `json:"front50" mapstructure:"front50"`
 		} `json:"services" mapstructure:"services"`
 	}

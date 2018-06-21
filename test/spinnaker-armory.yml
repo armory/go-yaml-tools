@@ -21,7 +21,7 @@ services:
       enabled: true
     s3:
       enabled: true
-    storage_bucket: ${ARMORYSPINNAKER_S3_BUCKET:}
+    storageBucket: ${ARMORYSPINNAKER_S3_BUCKET:}
     rootFolder: ${ARMORYSPINNAKER_S3_PREFIX:front50}
 
 

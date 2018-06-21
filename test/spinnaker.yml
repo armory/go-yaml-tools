@@ -101,9 +101,9 @@ services:
     baseUrl: ${services.default.protocol}://${services.front50.host}:${services.front50.port}
 
     # To use a cloud storage bucket on Amazon S3 or Google Cloud Storage instead
-    # of cassandra, set the storage_bucket, disable cassandra, and enable one of
+    # of cassandra, set the storageBucket, disable cassandra, and enable one of
     # the service providers.
-    storage_bucket: ${SPINNAKER_DEFAULT_STORAGE_BUCKET:}
+    storageBucket: ${SPINNAKER_DEFAULT_STORAGE_BUCKET:}
     # (GCS Only) Location for bucket.
 
 providers:
