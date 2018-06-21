@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/mitchellh/mapstructure"
-
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 )
