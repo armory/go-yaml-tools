@@ -9,21 +9,31 @@ type Decrypter interface {
 }
 
 type NoSecret struct {
-	secretConfig string
+	secret string
 }
 
 func (n *NoSecret) Decrypt() (string, error) {
-	return n.secretConfig, nil
+	return n.secret, nil
 }
 
-func NewDecrypter(secretConfig string) Decrypter {
-	decType := strings.Split(secretConfig, "!")
+var Registry ConfigRegistry
+
+type ConfigRegistry struct {
+	VaultConfig VaultConfig
+}
+
+func RegisterVaultConfig(vaultConfig VaultConfig) {
+	Registry.VaultConfig = vaultConfig
+}
+
+func NewDecrypter(encryptedSecret string) Decrypter {
+	decType := strings.Split(encryptedSecret, "!")
 	switch decType[0] {
 	case "encrypted:s3":
-		return NewS3Decrypter(secretConfig)
+		return NewS3Decrypter(encryptedSecret)
 	case "encrypted:vault":
-		return NewVaultDecrypter(secretConfig)
+		return getVaultDecrypter(encryptedSecret)
 	default:
-		return &NoSecret{secretConfig}
+		return &NoSecret{encryptedSecret}
 	}
 }

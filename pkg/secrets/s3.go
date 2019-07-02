@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	MAX_API_RETRY = 10
+	MaxApiRetry = 10
 )
 
 type S3Secret struct {
@@ -23,37 +23,37 @@ type S3Secret struct {
 }
 
 type S3Decrypter struct {
-	secretConfig string
+	encryptedSecret string
 }
 
-func NewS3Decrypter(secretConfig string) *S3Decrypter {
-	return &S3Decrypter{secretConfig}
+func NewS3Decrypter(encryptedSecret string) *S3Decrypter {
+	return &S3Decrypter{encryptedSecret}
 }
 
 func (s3 *S3Decrypter) Decrypt() (string, error) {
-	s3Secret, err := parseS3SecretConfig(s3.secretConfig)
+	s3Secret, err := parseS3EncryptedSecret(s3.encryptedSecret)
 	if err != nil {
 		return "", err
 	}
-	secret, err := s3Secret.fetchSecret()
+	decrypted, err := s3Secret.fetchSecret()
 	if err != nil {
 		return "", err
 	}
 
-	return secret, nil
+	return decrypted, nil
 }
 
-func parseS3SecretConfig(secretConfig string) (S3Secret, error) {
+func parseS3EncryptedSecret(encryptedSecret string) (S3Secret, error) {
 	var s3Secret S3Secret
-	configs := strings.Split(secretConfig, "!")
+	configs := strings.Split(encryptedSecret, "!")
 	if len(configs) < 2 {
-		return S3Secret{}, fmt.Errorf("bad format for secret syntax: %q", secretConfig)
+		return S3Secret{}, fmt.Errorf("bad format for secret syntax: %q", encryptedSecret)
 	}
 	for _, element := range configs {
 		kv := strings.Split(element, ":")
 		if len(kv) < 2 {
 			return S3Secret{}, fmt.Errorf("bad format for key-value pair in secret syntax %q: %s",
-				secretConfig, element)
+				encryptedSecret, element)
 		}
 		switch kv[0] {
 		case "encrypted":
@@ -67,7 +67,7 @@ func parseS3SecretConfig(secretConfig string) (S3Secret, error) {
 		case "k":
 			s3Secret.key = kv[1]
 		default:
-			return S3Secret{}, fmt.Errorf("invalid key in secret syntax %q: %s", secretConfig, kv[0])
+			return S3Secret{}, fmt.Errorf("invalid key in secret syntax %q: %s", encryptedSecret, kv[0])
 		}
 	}
 	return s3Secret, nil
@@ -76,7 +76,7 @@ func parseS3SecretConfig(secretConfig string) (S3Secret, error) {
 func (secret *S3Secret) fetchSecret() (string, error) {
 	sess, err := session.NewSession(&aws.Config{
 		Region:     aws.String(secret.region),
-		MaxRetries: aws.Int(MAX_API_RETRY),
+		MaxRetries: aws.Int(MaxApiRetry),
 	})
 	if err != nil {
 		return "", err
