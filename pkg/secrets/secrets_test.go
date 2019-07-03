@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -45,7 +46,7 @@ func TestParseYaml(t *testing.T) {
 	}
 }
 
-func TestParseS3SecretConfig(t *testing.T) {
+func TestParseS3Secret(t *testing.T) {
 	cases := []struct {
 		secret      string
 		expected    S3Secret
@@ -88,10 +89,10 @@ func TestParseS3SecretConfig(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		s3Secret, err := parseS3SecretConfig(c.secret)
+		s3Secret, err := parseS3EncryptedSecret(c.secret)
 		didError := (err != nil)
 		if didError != c.shouldError || s3Secret != c.expected {
-			t.Errorf("for parseS3SecretConfig(%s) -- expected %s with error=='%t' but got %s with error=='%t'",
+			t.Errorf("for parseS3EncryptedSecret(%s) -- expected %s with error=='%t' but got %s with error=='%t'",
 				c.secret, c.expected, c.shouldError, s3Secret, didError)
 		}
 	}
@@ -105,28 +106,28 @@ func TestDecrypter(t *testing.T) {
 		{
 			"encrypted:s3!b:bucket",
 			&S3Decrypter{
-				secretConfig: "encrypted:s3!b:bucket",
+				encryptedSecret: "encrypted:s3!b:bucket",
 			},
 		},
 		{
 			"encrypted:vault!e:engine",
 			&VaultDecrypter{
-				secretConfig: "encrypted:vault!e:engine",
+				encryptedSecret: "encrypted:vault!e:engine",
 			},
 		},
 		{
 			"notASecret",
 			&NoSecret{
-				secretConfig: "notASecret",
+				secret: "notASecret",
 			},
 		},
 	}
 
 	for _, c := range cases {
-		secret := NewDecrypter(c.secretConfig)
-		if reflect.TypeOf(secret) != reflect.TypeOf(c.expected) {
-			t.Errorf("for parseS3SecretConfig(%s) -- expected type %s but got type %s",
-				c.secretConfig, reflect.TypeOf(c.expected), reflect.TypeOf(secret))
+		decrypter := NewDecrypter(c.secretConfig)
+		if reflect.TypeOf(decrypter) != reflect.TypeOf(c.expected) {
+			t.Errorf("for parseS3EncryptedSecret(%s) -- expected type %s but got type %s",
+				c.secretConfig, reflect.TypeOf(c.expected), reflect.TypeOf(decrypter))
 		}
 	}
 }
@@ -138,5 +139,70 @@ func TestNoSecret(t *testing.T) {
 	if unchanged != notASecret {
 		t.Errorf("for NoSecret.Decrypt(%s) -- expected unchanged string %q, but got %q",
 			notASecret, notASecret, unchanged)
+	}
+}
+
+func TestNoVaultConfig(t *testing.T) {
+	decrypter := NewDecrypter("encrypted:vault!e:secret!n:test-secret!k:foo")
+	_, err := decrypter.Decrypt()
+	if err == nil || !strings.Contains(err.Error(), "configuration not found")   {
+		t.Errorf("real test -- error %q", err)
+	}
+}
+
+func TestParseVaultSecret(t *testing.T) {
+	cases := []struct {
+		secret      string
+		expected    VaultSecret
+		shouldError bool
+	}{
+		{
+			"encrypted:vault!e:engine!n:path!k:key",
+			VaultSecret{
+				engine:   "engine",
+				path:   "path",
+				key:      "key",
+			},
+			false,
+		},
+		{
+			"encrypted:vault!e:engine!n:path!k:key!b:true",
+			VaultSecret{
+				engine:   "engine",
+				path:   "path",
+				base64Encoded: "true",
+				key:      "key",
+			},
+			false,
+		},
+		{
+			"encrypted:vault!i:invalidKey",
+			VaultSecret{},
+			true,
+		},
+		{
+			"encrypted:vault",
+			VaultSecret{},
+			true,
+		},
+		{
+			"encrypted:vault!e",
+			VaultSecret{},
+			true,
+		},
+		{
+			"plainTextSecret",
+			VaultSecret{},
+			true,
+		},
+	}
+
+	for _, c := range cases {
+		vaultSecret, err := ParseVaultEncryptedSecret(c.secret)
+		didError := (err != nil)
+		if didError != c.shouldError || vaultSecret != c.expected {
+			t.Errorf("for parseS3EncryptedSecret(%s) -- expected %s with error=='%t' but got %s with error=='%t'",
+				c.secret, c.expected, c.shouldError, vaultSecret, didError)
+		}
 	}
 }
