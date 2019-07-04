@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	MAX_API_RETRY = 10
+	MaxApiRetry = 10
 )
 
 type S3Secret struct {
@@ -23,60 +23,54 @@ type S3Secret struct {
 }
 
 type S3Decrypter struct {
-	secretConfig string
+	params map[string]string
 }
 
-func NewS3Decrypter(secretConfig string) *S3Decrypter {
-	return &S3Decrypter{secretConfig}
+func NewS3Decrypter(params map[string]string) *S3Decrypter {
+	return &S3Decrypter{params}
 }
 
 func (s3 *S3Decrypter) Decrypt() (string, error) {
-	s3Secret, err := parseS3SecretConfig(s3.secretConfig)
+	s3Secret, err := ParseS3Secret(s3.params)
 	if err != nil {
 		return "", err
 	}
-	secret, err := s3Secret.fetchSecret()
-	if err != nil {
-		return "", err
-	}
-
-	return secret, nil
+	return s3Secret.fetchSecret()
 }
 
-func parseS3SecretConfig(secretConfig string) (S3Secret, error) {
+func ParseS3Secret(params map[string]string) (S3Secret, error) {
 	var s3Secret S3Secret
-	configs := strings.Split(secretConfig, "!")
-	if len(configs) < 2 {
-		return S3Secret{}, fmt.Errorf("bad format for secret syntax: %q", secretConfig)
+
+	region, ok := params["r"]
+	if !ok {
+		return S3Secret{}, fmt.Errorf("secret format error - 'r' for region is required")
 	}
-	for _, element := range configs {
-		kv := strings.Split(element, ":")
-		if len(kv) < 2 {
-			return S3Secret{}, fmt.Errorf("bad format for key-value pair in secret syntax %q: %s",
-				secretConfig, element)
-		}
-		switch kv[0] {
-		case "encrypted":
-			// do nothing
-		case "r":
-			s3Secret.region = kv[1]
-		case "b":
-			s3Secret.bucket = kv[1]
-		case "f":
-			s3Secret.filepath = kv[1]
-		case "k":
-			s3Secret.key = kv[1]
-		default:
-			return S3Secret{}, fmt.Errorf("invalid key in secret syntax %q: %s", secretConfig, kv[0])
-		}
+	s3Secret.region = region
+
+	bucket, ok := params["b"]
+	if !ok {
+		return S3Secret{}, fmt.Errorf("secret format error - 'b' for bucket is required")
 	}
+	s3Secret.bucket = bucket
+
+	filepath, ok := params["f"]
+	if !ok {
+		return S3Secret{}, fmt.Errorf("secret format error - 'f' for file is required")
+	}
+	s3Secret.filepath = filepath
+
+	key, ok := params["k"]
+	if ok {
+		s3Secret.key = key
+	}
+
 	return s3Secret, nil
 }
 
 func (secret *S3Secret) fetchSecret() (string, error) {
 	sess, err := session.NewSession(&aws.Config{
 		Region:     aws.String(secret.region),
-		MaxRetries: aws.Int(MAX_API_RETRY),
+		MaxRetries: aws.Int(MaxApiRetry),
 	})
 	if err != nil {
 		return "", err

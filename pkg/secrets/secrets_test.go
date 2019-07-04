@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -45,14 +46,19 @@ func TestParseYaml(t *testing.T) {
 	}
 }
 
-func TestParseS3SecretConfig(t *testing.T) {
+func TestParseS3Secret(t *testing.T) {
 	cases := []struct {
-		secret      string
+		params      map[string]string
 		expected    S3Secret
 		shouldError bool
 	}{
 		{
-			"encrypted:s3!r:region!b:bucket!f:file",
+			map[string]string {
+				"encrypted":"s3",
+				"r":"region",
+				"b":"bucket",
+				"f":"file",
+			},
 			S3Secret{
 				region:   "region",
 				bucket:   "bucket",
@@ -61,7 +67,13 @@ func TestParseS3SecretConfig(t *testing.T) {
 			false,
 		},
 		{
-			"encrypted:s3!r:region!b:bucket!f:file!k:key",
+			map[string]string {
+				"encrypted":"s3",
+				"r":"region",
+				"b":"bucket",
+				"f":"file",
+				"k":"key",
+			},
 			S3Secret{
 				region:   "region",
 				bucket:   "bucket",
@@ -71,28 +83,40 @@ func TestParseS3SecretConfig(t *testing.T) {
 			false,
 		},
 		{
-			"encrypted:s3!i:invalidKey",
+			map[string]string {
+				"encrypted":"s3",
+				"b":"bucket",
+				"f":"file",
+			},
 			S3Secret{},
 			true,
 		},
 		{
-			"encrypted:s3",
+			map[string]string {
+				"encrypted":"s3",
+				"r":"region",
+				"f":"file",
+			},
 			S3Secret{},
 			true,
 		},
 		{
-			"plainTextSecret",
+			map[string]string {
+				"encrypted":"s3",
+				"r":"region",
+				"b":"bucket",
+			},
 			S3Secret{},
 			true,
 		},
 	}
 
 	for _, c := range cases {
-		s3Secret, err := parseS3SecretConfig(c.secret)
+		s3Secret, err := ParseS3Secret(c.params)
 		didError := (err != nil)
 		if didError != c.shouldError || s3Secret != c.expected {
-			t.Errorf("for parseS3SecretConfig(%s) -- expected %s with error=='%t' but got %s with error=='%t'",
-				c.secret, c.expected, c.shouldError, s3Secret, didError)
+			t.Errorf("for parseS3EncryptedSecret(%s) -- expected %s with error=='%t' but got %s with error=='%t'",
+				c.params, c.expected, c.shouldError, s3Secret, didError)
 		}
 	}
 }
@@ -104,29 +128,25 @@ func TestDecrypter(t *testing.T) {
 	}{
 		{
 			"encrypted:s3!b:bucket",
-			&S3Decrypter{
-				secretConfig: "encrypted:s3!b:bucket",
-			},
+			&S3Decrypter{},
 		},
 		{
 			"encrypted:vault!e:engine",
-			&VaultDecrypter{
-				secretConfig: "encrypted:vault!e:engine",
-			},
+			&VaultDecrypter{},
 		},
 		{
 			"notASecret",
 			&NoSecret{
-				secretConfig: "notASecret",
+				secret: "notASecret",
 			},
 		},
 	}
 
 	for _, c := range cases {
-		secret := NewDecrypter(c.secretConfig)
-		if reflect.TypeOf(secret) != reflect.TypeOf(c.expected) {
-			t.Errorf("for parseS3SecretConfig(%s) -- expected type %s but got type %s",
-				c.secretConfig, reflect.TypeOf(c.expected), reflect.TypeOf(secret))
+		decrypter := NewDecrypter(c.secretConfig)
+		if reflect.TypeOf(decrypter) != reflect.TypeOf(c.expected) {
+			t.Errorf("for parseS3EncryptedSecret(%s) -- expected type %s but got type %s",
+				c.secretConfig, reflect.TypeOf(c.expected), reflect.TypeOf(decrypter))
 		}
 	}
 }
@@ -138,5 +158,89 @@ func TestNoSecret(t *testing.T) {
 	if unchanged != notASecret {
 		t.Errorf("for NoSecret.Decrypt(%s) -- expected unchanged string %q, but got %q",
 			notASecret, notASecret, unchanged)
+	}
+}
+
+func TestNoVaultConfig(t *testing.T) {
+	decrypter := NewDecrypter("encrypted:vault!e:secret!n:test-secret!k:foo")
+	_, err := decrypter.Decrypt()
+	expectedError := "configuration not found"
+	if err == nil || !strings.Contains(err.Error(), expectedError)   {
+		t.Errorf("attempting to Decrypt() without vault configured, expected error with %q but got: %q", expectedError, err)
+	}
+}
+
+func TestParseVaultSecret(t *testing.T) {
+	cases := []struct {
+		params      map[string]string
+		expected    VaultSecret
+		shouldError bool
+	}{
+		{
+			map[string]string{
+				"encrypted":"vault",
+				"e":"engine",
+				"n":"path",
+				"k":"key",
+			},
+			VaultSecret{
+				engine:   "engine",
+				path:   "path",
+				key:      "key",
+			},
+			false,
+		},
+		{
+			map[string]string{
+				"encrypted":"vault",
+				"e":"engine",
+				"n":"path",
+				"k":"key",
+				"b":"true",
+			},
+			VaultSecret{
+				engine:   "engine",
+				path:   "path",
+				base64Encoded: "true",
+				key:      "key",
+			},
+			false,
+		},
+		{
+			map[string]string{
+				"encrypted":"vault",
+				"n":"path",
+				"k":"key",
+			},
+			VaultSecret{},
+			true,
+		},
+		{
+			map[string]string{
+				"encrypted":"vault",
+				"e":"engine",
+				"k":"key",
+			},
+			VaultSecret{},
+			true,
+		},
+		{
+			map[string]string{
+				"encrypted":"vault",
+				"e":"engine",
+				"n":"path",
+			},
+			VaultSecret{},
+			true,
+		},
+	}
+
+	for _, c := range cases {
+		vaultSecret, err := ParseVaultSecret(c.params)
+		didError := (err != nil)
+		if didError != c.shouldError || vaultSecret != c.expected {
+			t.Errorf("for parseS3EncryptedSecret(%s) -- expected %s with error=='%t' but got %s with error=='%t'",
+				c.params, c.expected, c.shouldError, vaultSecret, didError)
+		}
 	}
 }
