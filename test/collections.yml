@@ -6,6 +6,11 @@ multiValCol:
   -
     multi_two_one: two-one
     multi_two_two: two-two
+multiValColAgain:
+  - multi_one_one: one-one
+    multi_one_two: one-two
+  - multi_two_one: two-one
+    multi_two_two: two-two
 col:
     - one
     - two
