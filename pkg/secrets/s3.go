@@ -6,9 +6,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	yamlParse "gopkg.in/yaml.v2"
-	"reflect"
-	"strings"
 )
 
 const (
@@ -97,27 +94,4 @@ func (secret *S3Secret) fetchSecret() (string, error) {
 	}
 
 	return string(contents.Bytes()), nil
-}
-
-func parseSecretFile(fileContents []byte, key string) (string, error) {
-	m := make(map[interface{}]interface{})
-	if err := yamlParse.Unmarshal(fileContents, &m); err != nil {
-		return "", err
-	}
-
-	for _, yamlKey := range strings.Split(key, ".") {
-		switch s := m[yamlKey].(type) {
-		case map[interface{}]interface{}:
-			m = s
-		case string:
-			return s, nil
-		case nil:
-			return "", fmt.Errorf("error parsing secret file: couldn't find key %q in yaml", key)
-		default:
-			return "", fmt.Errorf("error parsing secret file: unknown type %q with value %q",
-				reflect.TypeOf(s), s)
-		}
-	}
-
-	return "", fmt.Errorf("error parsing secret file for key %q", key)
 }

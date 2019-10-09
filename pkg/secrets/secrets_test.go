@@ -53,11 +53,11 @@ func TestParseS3Secret(t *testing.T) {
 		shouldError bool
 	}{
 		{
-			map[string]string {
-				"encrypted":"s3",
-				"r":"region",
-				"b":"bucket",
-				"f":"file",
+			map[string]string{
+				"encrypted": "s3",
+				"r":         "region",
+				"b":         "bucket",
+				"f":         "file",
 			},
 			S3Secret{
 				region:   "region",
@@ -67,12 +67,12 @@ func TestParseS3Secret(t *testing.T) {
 			false,
 		},
 		{
-			map[string]string {
-				"encrypted":"s3",
-				"r":"region",
-				"b":"bucket",
-				"f":"file",
-				"k":"key",
+			map[string]string{
+				"encrypted": "s3",
+				"r":         "region",
+				"b":         "bucket",
+				"f":         "file",
+				"k":         "key",
 			},
 			S3Secret{
 				region:   "region",
@@ -83,28 +83,28 @@ func TestParseS3Secret(t *testing.T) {
 			false,
 		},
 		{
-			map[string]string {
-				"encrypted":"s3",
-				"b":"bucket",
-				"f":"file",
+			map[string]string{
+				"encrypted": "s3",
+				"b":         "bucket",
+				"f":         "file",
 			},
 			S3Secret{},
 			true,
 		},
 		{
-			map[string]string {
-				"encrypted":"s3",
-				"r":"region",
-				"f":"file",
+			map[string]string{
+				"encrypted": "s3",
+				"r":         "region",
+				"f":         "file",
 			},
 			S3Secret{},
 			true,
 		},
 		{
-			map[string]string {
-				"encrypted":"s3",
-				"r":"region",
-				"b":"bucket",
+			map[string]string{
+				"encrypted": "s3",
+				"r":         "region",
+				"b":         "bucket",
 			},
 			S3Secret{},
 			true,
@@ -121,6 +121,58 @@ func TestParseS3Secret(t *testing.T) {
 	}
 }
 
+func TestParseGcsSecret(t *testing.T) {
+	cases := []struct {
+		params      map[string]string
+		expected    GcsSecret
+		shouldError bool
+	}{
+		{
+			map[string]string{
+				"encrypted": "gcs",
+				"b":         "bucket",
+				"f":         "file",
+			},
+			GcsSecret{
+				bucket:   "bucket",
+				filepath: "file",
+			},
+			false,
+		},
+		{
+			map[string]string{
+				"encrypted": "gcs",
+				"b":         "bucket",
+				"f":         "file",
+				"k":         "key",
+			},
+			GcsSecret{
+				bucket:   "bucket",
+				filepath: "file",
+				key:      "key",
+			},
+			false,
+		},
+		{
+			map[string]string{
+				"encrypted": "gcs",
+				"b":         "bucket",
+			},
+			GcsSecret{},
+			true,
+		},
+	}
+
+	for _, c := range cases {
+		gcsSecret, err := ParseGcsSecret(c.params)
+		didError := (err != nil)
+		if didError != c.shouldError || gcsSecret != c.expected {
+			t.Errorf("for parseGcsEncryptedSecret(%s) -- expected %s with error=='%t' but got %s with error=='%t'",
+				c.params, c.expected, c.shouldError, gcsSecret, didError)
+		}
+	}
+}
+
 func TestDecrypter(t *testing.T) {
 	cases := []struct {
 		secretConfig string
@@ -129,6 +181,10 @@ func TestDecrypter(t *testing.T) {
 		{
 			"encrypted:s3!b:bucket",
 			&S3Decrypter{},
+		},
+		{
+			"encrypted:gcs!b:bucket",
+			&GcsDecrypter{},
 		},
 		{
 			"encrypted:vault!e:engine",
@@ -165,7 +221,7 @@ func TestNoVaultConfig(t *testing.T) {
 	decrypter := NewDecrypter("encrypted:vault!e:secret!n:test-secret!k:foo")
 	_, err := decrypter.Decrypt()
 	expectedError := "configuration not found"
-	if err == nil || !strings.Contains(err.Error(), expectedError)   {
+	if err == nil || !strings.Contains(err.Error(), expectedError) {
 		t.Errorf("attempting to Decrypt() without vault configured, expected error with %q but got: %q", expectedError, err)
 	}
 }
@@ -178,57 +234,57 @@ func TestParseVaultSecret(t *testing.T) {
 	}{
 		{
 			map[string]string{
-				"encrypted":"vault",
-				"e":"engine",
-				"n":"path",
-				"k":"key",
+				"encrypted": "vault",
+				"e":         "engine",
+				"n":         "path",
+				"k":         "key",
 			},
 			VaultSecret{
-				engine:   "engine",
+				engine: "engine",
 				path:   "path",
-				key:      "key",
+				key:    "key",
 			},
 			false,
 		},
 		{
 			map[string]string{
-				"encrypted":"vault",
-				"e":"engine",
-				"n":"path",
-				"k":"key",
-				"b":"true",
+				"encrypted": "vault",
+				"e":         "engine",
+				"n":         "path",
+				"k":         "key",
+				"b":         "true",
 			},
 			VaultSecret{
-				engine:   "engine",
-				path:   "path",
+				engine:        "engine",
+				path:          "path",
 				base64Encoded: "true",
-				key:      "key",
+				key:           "key",
 			},
 			false,
 		},
 		{
 			map[string]string{
-				"encrypted":"vault",
-				"n":"path",
-				"k":"key",
+				"encrypted": "vault",
+				"n":         "path",
+				"k":         "key",
 			},
 			VaultSecret{},
 			true,
 		},
 		{
 			map[string]string{
-				"encrypted":"vault",
-				"e":"engine",
-				"k":"key",
+				"encrypted": "vault",
+				"e":         "engine",
+				"k":         "key",
 			},
 			VaultSecret{},
 			true,
 		},
 		{
 			map[string]string{
-				"encrypted":"vault",
-				"e":"engine",
-				"n":"path",
+				"encrypted": "vault",
+				"e":         "engine",
+				"n":         "path",
 			},
 			VaultSecret{},
 			true,

@@ -2,6 +2,8 @@ package secrets
 
 import (
 	"fmt"
+	yamlParse "gopkg.in/yaml.v2"
+	"reflect"
 	"strings"
 )
 
@@ -36,6 +38,8 @@ func NewDecrypter(encryptedSecret string) Decrypter {
 	switch engine {
 	case "s3":
 		return NewS3Decrypter(params)
+	case "gcs":
+		return NewGcsDecrypter(params)
 	case "vault":
 		return NewVaultDecrypter(params)
 	default:
@@ -58,4 +62,27 @@ func ParseTokens(encryptedSecret string) (string, map[string]string) {
 		}
 	}
 	return engine, params
+}
+
+func parseSecretFile(fileContents []byte, key string) (string, error) {
+	m := make(map[interface{}]interface{})
+	if err := yamlParse.Unmarshal(fileContents, &m); err != nil {
+		return "", err
+	}
+
+	for _, yamlKey := range strings.Split(key, ".") {
+		switch s := m[yamlKey].(type) {
+		case map[interface{}]interface{}:
+			m = s
+		case string:
+			return s, nil
+		case nil:
+			return "", fmt.Errorf("error parsing secret file: couldn't find key %q in yaml", key)
+		default:
+			return "", fmt.Errorf("error parsing secret file: unknown type %q with value %q",
+				reflect.TypeOf(s), s)
+		}
+	}
+
+	return "", fmt.Errorf("error parsing secret file for key %q", key)
 }
