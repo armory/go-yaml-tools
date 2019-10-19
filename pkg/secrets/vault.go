@@ -67,6 +67,9 @@ func (decrypter *VaultDecrypter) setToken() error {
 
 	if Registry.VaultConfig.AuthMethod == "TOKEN" {
 		token = os.Getenv("VAULT_TOKEN")
+		if token == "" {
+			return fmt.Errorf("VAULT_TOKEN environment variable not set")
+		}
 	} else if Registry.VaultConfig.AuthMethod == "KUBERNETES" {
 		token, err = decrypter.fetchServiceAccountToken()
 	} else {
