@@ -1,7 +1,6 @@
 package secrets
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
