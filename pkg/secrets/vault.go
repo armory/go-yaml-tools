@@ -2,10 +2,11 @@ package secrets
 
 import (
 	"fmt"
-	"github.com/hashicorp/vault/api"
 	"io/ioutil"
 	"os"
 	"strings"
+
+	"github.com/hashicorp/vault/api"
 )
 
 type VaultConfig struct {
@@ -36,28 +37,50 @@ func (decrypter *VaultDecrypter) Decrypt() (string, error) {
 	if (VaultConfig{}) == Registry.VaultConfig {
 		return "", fmt.Errorf("error: vault secrets configuration not found")
 	}
-	vaultSecret, err := ParseVaultSecret(decrypter.params)
+	vaultSecret, err := parseVaultSecret(decrypter.params)
 	if err != nil {
 		return "", fmt.Errorf("error parsing vault secret syntax - %s", err)
 	}
 
 	if Registry.VaultConfig.Token == "" {
-		token, err := decrypter.FetchVaultToken()
+		err := decrypter.setToken()
 		if err != nil {
-			return "", fmt.Errorf("error fetching vault token - %s", err)
+			return "", err
 		}
-		Registry.VaultConfig.Token = token
 	}
 
-	secret, err := decrypter.FetchSecret(vaultSecret)
+	secret, err := decrypter.fetchSecret(vaultSecret)
 	if err != nil && strings.Contains(err.Error(), "403") {
 		// get new token and retry in case our saved token is no longer valid
-		return decrypter.RetryFetchSecret(vaultSecret)
+		err := decrypter.setToken()
+		if err != nil {
+			return "", err
+		}
+		return decrypter.fetchSecret(vaultSecret)
 	}
 	return secret, err
 }
 
-func ValidateVaultConfig(vaultConfig VaultConfig) error {
+func (decrypter *VaultDecrypter) setToken() error {
+	var token string
+	var err error
+
+	if Registry.VaultConfig.AuthMethod == "TOKEN" {
+		token = os.Getenv("VAULT_TOKEN")
+	} else if Registry.VaultConfig.AuthMethod == "KUBERNETES" {
+		token, err = decrypter.fetchServiceAccountToken()
+	} else {
+		err = fmt.Errorf("unknown Vault auth method: %q", Registry.VaultConfig.AuthMethod)
+	}
+
+	if err != nil {
+		return fmt.Errorf("error fetching vault token - %s", err)
+	}
+	Registry.VaultConfig.Token = token
+	return nil
+}
+
+func validateVaultConfig(vaultConfig VaultConfig) error {
 	if (VaultConfig{}) == vaultConfig {
 		return fmt.Errorf("vault secrets not configured in service profile yaml")
 	}
@@ -72,7 +95,7 @@ func ValidateVaultConfig(vaultConfig VaultConfig) error {
 	}
 
 	if vaultConfig.AuthMethod == "TOKEN" {
-		if token := os.Getenv("VAULT_TOKEN"); token == "" {
+		if envToken := os.Getenv("VAULT_TOKEN"); envToken == "" && vaultConfig.Token == "" {
 			return fmt.Errorf("VAULT_TOKEN environment variable not set")
 		}
 	} else if vaultConfig.AuthMethod == "KUBERNETES" {
@@ -86,7 +109,7 @@ func ValidateVaultConfig(vaultConfig VaultConfig) error {
 	return nil
 }
 
-func ParseVaultSecret(params map[string]string) (VaultSecret, error) {
+func parseVaultSecret(params map[string]string) (VaultSecret, error) {
 	var vaultSecret VaultSecret
 
 	engine, ok := params["e"]
@@ -118,17 +141,7 @@ func ParseVaultSecret(params map[string]string) (VaultSecret, error) {
 	return vaultSecret, nil
 }
 
-func (decrypter *VaultDecrypter) FetchVaultToken() (string, error) {
-	if Registry.VaultConfig.AuthMethod == "TOKEN" {
-		return os.Getenv("VAULT_TOKEN"), nil
-	} else if Registry.VaultConfig.AuthMethod == "KUBERNETES" {
-		return decrypter.FetchServiceAccountToken()
-	} else {
-		return "", fmt.Errorf("unknown Vault auth method: %q", Registry.VaultConfig.AuthMethod)
-	}
-}
-
-func (decrypter *VaultDecrypter) FetchServiceAccountToken() (string, error) {
+func (decrypter *VaultDecrypter) fetchServiceAccountToken() (string, error) {
 	client, err := api.NewClient(&api.Config{
 		Address: Registry.VaultConfig.Url,
 	})
@@ -165,7 +178,7 @@ func (decrypter *VaultDecrypter) FetchVaultClient(token string) (*api.Client, er
 	return client, nil
 }
 
-func (decrypter *VaultDecrypter) FetchSecret(secret VaultSecret) (string, error) {
+func (decrypter *VaultDecrypter) fetchSecret(secret VaultSecret) (string, error) {
 	client, err := decrypter.FetchVaultClient(Registry.VaultConfig.Token)
 	if err != nil {
 		return "", fmt.Errorf("error fetching vault client - %s", err)
@@ -213,13 +226,4 @@ func (decrypter *VaultDecrypter) FetchSecret(secret VaultSecret) (string, error)
 	}
 
 	return "", nil
-}
-
-func (decrypter *VaultDecrypter) RetryFetchSecret(secret VaultSecret) (string, error) {
-	token, err := decrypter.FetchVaultToken()
-	if err != nil {
-		return "", fmt.Errorf("error fetching vault token - %s", err)
-	}
-	Registry.VaultConfig.Token = token
-	return decrypter.FetchSecret(secret)
 }

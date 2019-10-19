@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -292,7 +293,7 @@ func TestParseVaultSecret(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		vaultSecret, err := ParseVaultSecret(c.params)
+		vaultSecret, err := parseVaultSecret(c.params)
 		didError := (err != nil)
 		if didError != c.shouldError || vaultSecret != c.expected {
 			t.Errorf("for parseS3EncryptedSecret(%s) -- expected %s with error=='%t' but got %s with error=='%t'",
