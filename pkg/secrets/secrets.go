@@ -26,7 +26,7 @@ type ConfigRegistry struct {
 }
 
 func RegisterVaultConfig(vaultConfig VaultConfig) error {
-	if err := ValidateVaultConfig(vaultConfig); err != nil {
+	if err := validateVaultConfig(vaultConfig); err != nil {
 		return fmt.Errorf("vault configuration error - %s", err)
 	}
 	Registry.VaultConfig = vaultConfig
@@ -34,7 +34,7 @@ func RegisterVaultConfig(vaultConfig VaultConfig) error {
 }
 
 func NewDecrypter(encryptedSecret string) Decrypter {
-	engine, params := ParseTokens(encryptedSecret)
+	engine, params := parseTokens(encryptedSecret)
 	switch engine {
 	case "s3":
 		return NewS3Decrypter(params)
@@ -47,7 +47,7 @@ func NewDecrypter(encryptedSecret string) Decrypter {
 	}
 }
 
-func ParseTokens(encryptedSecret string) (string, map[string]string) {
+func parseTokens(encryptedSecret string) (string, map[string]string) {
 	var engine string
 	params := map[string]string{}
 	tokens := strings.Split(encryptedSecret, "!")
