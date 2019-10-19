@@ -98,8 +98,11 @@ func validateVaultConfig(vaultConfig VaultConfig) error {
 	}
 
 	if vaultConfig.AuthMethod == "TOKEN" {
-		if envToken := os.Getenv("VAULT_TOKEN"); envToken == "" && vaultConfig.Token == "" {
-			return fmt.Errorf("VAULT_TOKEN environment variable not set")
+		if vaultConfig.Token == "" {
+			envToken := os.Getenv("VAULT_TOKEN")
+			if envToken == "" {
+				return fmt.Errorf("VAULT_TOKEN environment variable not set")
+			}
 		}
 	} else if vaultConfig.AuthMethod == "KUBERNETES" {
 		if vaultConfig.Path == "" || vaultConfig.Role == "" {
