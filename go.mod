@@ -1,10 +1,9 @@
-module go-yaml-tools
+module github.com/armory/go-yaml-tools
 
 go 1.13
 
 require (
 	cloud.google.com/go/storage v1.1.1
-	github.com/armory/go-yaml-tools v0.0.0-20191009181739-40b9f722d024
 	github.com/aws/aws-sdk-go v1.25.8
 	github.com/golang/groupcache v0.0.0-20191002201903-404acd9df4cc // indirect
 	github.com/hashicorp/go-retryablehttp v0.6.2 // indirect
