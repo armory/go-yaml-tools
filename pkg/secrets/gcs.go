@@ -2,8 +2,8 @@ package secrets
 
 import (
 	"cloud.google.com/go/storage"
+	"context"
 	"fmt"
-	"golang.org/x/net/context"
 	"io/ioutil"
 )
 
@@ -16,10 +16,11 @@ type GcsSecret struct {
 type GcsDecrypter struct {
 	params map[string]string
 	ctx    context.Context
+	isFile bool
 }
 
-func NewGcsDecrypter(params map[string]string) *GcsDecrypter {
-	return &GcsDecrypter{params: params, ctx: context.Background()}
+func NewGcsDecrypter(params map[string]string, isFile bool) Decrypter {
+	return &GcsDecrypter{params: params, ctx: context.Background(), isFile: isFile}
 }
 
 func (gcs *GcsDecrypter) Decrypt() (string, error) {
@@ -27,7 +28,15 @@ func (gcs *GcsDecrypter) Decrypt() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return gcsSecret.fetchSecret(gcs.ctx)
+	sec, err := gcsSecret.fetchSecret(gcs.ctx)
+	if err != nil || !gcs.isFile {
+		return sec, err
+	}
+	return ToTempFile([]byte(sec))
+}
+
+func (gcs *GcsDecrypter) IsFile() bool {
+	return gcs.isFile
 }
 
 func ParseGcsSecret(params map[string]string) (GcsSecret, error) {

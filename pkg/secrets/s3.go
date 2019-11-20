@@ -21,10 +21,11 @@ type S3Secret struct {
 
 type S3Decrypter struct {
 	params map[string]string
+	isFile bool
 }
 
-func NewS3Decrypter(params map[string]string) *S3Decrypter {
-	return &S3Decrypter{params}
+func NewS3Decrypter(params map[string]string, isFile bool) Decrypter {
+	return &S3Decrypter{params, isFile}
 }
 
 func (s3 *S3Decrypter) Decrypt() (string, error) {
@@ -32,7 +33,15 @@ func (s3 *S3Decrypter) Decrypt() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s3Secret.fetchSecret()
+	sec, err := s3Secret.fetchSecret()
+	if err != nil || !s3.isFile {
+		return sec, err
+	}
+	return ToTempFile([]byte(sec))
+}
+
+func (s3 *S3Decrypter) IsFile() bool {
+	return s3.isFile
 }
 
 func ParseS3Secret(params map[string]string) (S3Secret, error) {

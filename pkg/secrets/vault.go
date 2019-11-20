@@ -9,6 +9,14 @@ import (
 	"github.com/hashicorp/vault/api"
 )
 
+func RegisterVaultConfig(vaultConfig VaultConfig) error {
+	if err := validateVaultConfig(vaultConfig); err != nil {
+		return fmt.Errorf("vault configuration error - %s", err)
+	}
+	Registry.VaultConfig = vaultConfig
+	return nil
+}
+
 type VaultConfig struct {
 	Enabled    bool   `json:"enabled" yaml:"enabled"`
 	Url        string `json:"url" yaml:"url"`
@@ -27,10 +35,11 @@ type VaultSecret struct {
 
 type VaultDecrypter struct {
 	params map[string]string
+	isFile bool
 }
 
-func NewVaultDecrypter(params map[string]string) *VaultDecrypter {
-	return &VaultDecrypter{params}
+func NewVaultDecrypter(params map[string]string, isFile bool) Decrypter {
+	return &VaultDecrypter{params, isFile}
 }
 
 func (decrypter *VaultDecrypter) Decrypt() (string, error) {
@@ -56,9 +65,16 @@ func (decrypter *VaultDecrypter) Decrypt() (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return decrypter.fetchSecret(vaultSecret)
+		secret, err = decrypter.fetchSecret(vaultSecret)
 	}
-	return secret, err
+	if err != nil || !decrypter.isFile {
+		return secret, err
+	}
+	return ToTempFile([]byte(secret))
+}
+
+func (v *VaultDecrypter) IsFile() bool {
+	return v.isFile
 }
 
 func (decrypter *VaultDecrypter) setToken() error {
@@ -165,7 +181,7 @@ func (decrypter *VaultDecrypter) fetchServiceAccountToken() (string, error) {
 		"jwt":  token,
 	}
 
-	secret, err := client.Logical().Write("auth/" + Registry.VaultConfig.Path + "/login", data)
+	secret, err := client.Logical().Write("auth/"+Registry.VaultConfig.Path+"/login", data)
 	if err != nil {
 		return "", fmt.Errorf("error logging into vault using kubernetes auth: %s", err)
 	}

@@ -192,8 +192,8 @@ func TestDecrypter(t *testing.T) {
 		},
 		{
 			"notASecret",
-			&NoSecret{
-				secret: "notASecret",
+			&NoopDecrypter{
+				value: "notASecret",
 			},
 		},
 	}
