@@ -1,10 +1,12 @@
 package secrets
 
-func NewNoopDecrypter(params map[string]string, isFile bool) Decrypter {
+import "context"
+
+func NewNoopDecrypter(ctx context.Context, isFile bool, params string) (Decrypter, error) {
 	return &NoopDecrypter{
-		value:  params["v"],
+		value:  params,
 		isFile: isFile,
-	}
+	}, nil
 }
 
 type NoopDecrypter struct {
@@ -14,6 +16,10 @@ type NoopDecrypter struct {
 
 func (n *NoopDecrypter) Decrypt() (string, error) {
 	return n.value, nil
+}
+
+func (n *NoopDecrypter) ParseTokens(secret string) {
+	n.value = secret[len("encrypted:noop!v:"):]
 }
 
 func (n *NoopDecrypter) IsFile() bool {

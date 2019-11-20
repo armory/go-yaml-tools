@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"context"
 	"fmt"
 	yamlParse "gopkg.in/yaml.v2"
 	"io/ioutil"
@@ -9,59 +10,55 @@ import (
 )
 
 const (
-	encryptedPrefix     = "encrypted"
-	encryptedFilePrefix = "encryptedFile"
+	encryptedPrefix     = "encrypted:"
+	encryptedFilePrefix = "encryptedFile:"
 )
 
-var Engines = map[string]func(map[string]string, bool) Decrypter{
-	"s3":    NewS3Decrypter,
-	"gcs":   NewGcsDecrypter,
-	"vault": NewVaultDecrypter,
-	"noop":  NewNoopDecrypter,
+var Engines = map[string]func(context.Context, bool, string) (Decrypter, error){
+	"s3":   NewS3Decrypter,
+	"gcs":  NewGcsDecrypter,
+	"noop": NewNoopDecrypter,
 }
-
-var Registry ConfigRegistry
 
 type Decrypter interface {
 	Decrypt() (string, error)
 	IsFile() bool
 }
 
-type ConfigRegistry struct {
-	VaultConfig VaultConfig
+func IsEncryptedSecret(val string) bool {
+	return strings.HasPrefix(val, encryptedPrefix) ||
+		strings.HasPrefix(val, encryptedFilePrefix)
 }
 
-func NewDecrypter(encryptedSecret string) Decrypter {
-	engine, params, isFile := parseTokens(encryptedSecret)
-	decrypter, ok := Engines[engine]
+func NewDecrypter(ctx context.Context, encryptedSecret string) (Decrypter, error) {
+	e, isFile, params := GetEngine(encryptedSecret)
+	if e == "" {
+		return &NoopDecrypter{value: encryptedSecret}, nil
+	}
+	engine, ok := Engines[e]
 	if !ok {
-		return &NoopDecrypter{
-			value:  encryptedSecret,
-			isFile: false,
-		}
+		return nil, fmt.Errorf("secret engine %s not registered", e)
 	}
-	return decrypter(params, isFile)
+	return engine(ctx, isFile, params)
 }
 
-func parseTokens(encryptedSecret string) (string, map[string]string, bool) {
-	var engine string
-	params := map[string]string{}
-	tokens := strings.Split(encryptedSecret, "!")
+// GetEngine returns the name of the engine if recognized,
+// the remainder of the parameters (unparsed) and a boolean that indicates
+// if the user requested a file.
+func GetEngine(encryptedSecret string) (string, bool, string) {
 	isFile := false
-	for _, element := range tokens {
-		kv := strings.Split(element, ":")
-		if len(kv) == 2 {
-			if kv[0] == encryptedPrefix {
-				engine = kv[1]
-			} else if kv[1] == encryptedFilePrefix {
-				engine = kv[1]
-				isFile = true
-			} else {
-				params[kv[0]] = kv[1]
-			}
-		}
+	prefixLen := 0
+	if strings.HasPrefix(encryptedSecret, encryptedPrefix) {
+		prefixLen = len(encryptedPrefix)
+	} else if strings.HasPrefix(encryptedSecret, encryptedFilePrefix) {
+		prefixLen = len(encryptedFilePrefix)
+		isFile = true
 	}
-	return engine, params, isFile
+	idx := strings.Index(encryptedSecret, "!")
+	if idx == -1 {
+		return "", false, ""
+	}
+	return encryptedSecret[prefixLen:idx], isFile, encryptedSecret[idx+1:]
 }
 
 func parseSecretFile(fileContents []byte, key string) (string, error) {

@@ -1,10 +1,90 @@
 package secrets
 
 import (
+	"context"
+	"github.com/stretchr/testify/assert"
 	"reflect"
-	"strings"
 	"testing"
 )
+
+func TestMain(m *testing.M) {
+	RegisterVaultConfig(VaultConfig{
+		Enabled:    true,
+		Url:        "http://mytest.url",
+		AuthMethod: "TOKEN",
+		Token:      "abcdef",
+	})
+	m.Run()
+	delete(Engines, "vault")
+}
+
+func TestEngineCheck(t *testing.T) {
+	cases := []struct {
+		name     string
+		value    string
+		expected string
+		params   string
+		isFile   bool
+	}{
+		{
+			"Regular string no engine",
+			"test",
+			"",
+			"",
+			false,
+		},
+		{
+			"Empty string",
+			"",
+			"",
+			"",
+			false,
+		},
+		{
+			"s3 engine",
+			"encrypted:s3!b:blah",
+			"s3",
+			"b:blah",
+			false,
+		},
+		{
+			"s3 engine as file",
+			"encryptedFile:s3!b:blah",
+			"s3",
+			"b:blah",
+			true,
+		},
+		{
+			"even no params should recognize the engine",
+			"encrypted:s3!",
+			"s3",
+			"",
+			false,
+		},
+		{
+			"unregistered engines are recognized",
+			"encrypted:blah!",
+			"blah",
+			"",
+			false,
+		},
+		{
+			"but we need a bang separator",
+			"encrypted:s3",
+			"",
+			"",
+			false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e, f, p := GetEngine(c.value)
+			assert.Equal(t, c.expected, e)
+			assert.Equal(t, c.isFile, f)
+			assert.Equal(t, c.params, p)
+		})
+	}
+}
 
 func TestParseYaml(t *testing.T) {
 	cases := []struct {
@@ -48,127 +128,91 @@ func TestParseYaml(t *testing.T) {
 
 func TestParseS3Secret(t *testing.T) {
 	cases := []struct {
-		params      map[string]string
-		expected    S3Secret
+		params      string
+		expected    func(*testing.T, *S3Decrypter)
 		shouldError bool
 	}{
 		{
-			map[string]string{
-				"encrypted": "s3",
-				"r":         "region",
-				"b":         "bucket",
-				"f":         "file",
-			},
-			S3Secret{
-				region:   "region",
-				bucket:   "bucket",
-				filepath: "file",
+			"r:region!b:bucket!f:file",
+			func(t *testing.T, decrypter *S3Decrypter) {
+				assert.Equal(t, "region", decrypter.region)
+				assert.Equal(t, "bucket", decrypter.bucket)
+				assert.Equal(t, "file", decrypter.filepath)
 			},
 			false,
 		},
 		{
-			map[string]string{
-				"encrypted": "s3",
-				"r":         "region",
-				"b":         "bucket",
-				"f":         "file",
-				"k":         "key",
-			},
-			S3Secret{
-				region:   "region",
-				bucket:   "bucket",
-				filepath: "file",
-				key:      "key",
+			"r:region!b:bucket!f:file!k:key",
+			func(t *testing.T, decrypter *S3Decrypter) {
+				assert.Equal(t, "region", decrypter.region)
+				assert.Equal(t, "bucket", decrypter.bucket)
+				assert.Equal(t, "file", decrypter.filepath)
+				assert.Equal(t, "key", decrypter.key)
+
 			},
 			false,
 		},
 		{
-			map[string]string{
-				"encrypted": "s3",
-				"b":         "bucket",
-				"f":         "file",
-			},
-			S3Secret{},
+			"b:bucket!f:file",
+			func(t *testing.T, decrypter *S3Decrypter) {},
 			true,
 		},
 		{
-			map[string]string{
-				"encrypted": "s3",
-				"r":         "region",
-				"f":         "file",
-			},
-			S3Secret{},
+			"r:region!f:file",
+			func(t *testing.T, decrypter *S3Decrypter) {},
 			true,
 		},
 		{
-			map[string]string{
-				"encrypted": "s3",
-				"r":         "region",
-				"b":         "bucket",
-			},
-			S3Secret{},
+			"r:region!b:bucket",
+			func(t *testing.T, decrypter *S3Decrypter) {},
 			true,
 		},
 	}
 
 	for _, c := range cases {
-		s3Secret, err := ParseS3Secret(c.params)
-		didError := (err != nil)
-		if didError != c.shouldError || s3Secret != c.expected {
-			t.Errorf("for parseS3EncryptedSecret(%s) -- expected %s with error=='%t' but got %s with error=='%t'",
-				c.params, c.expected, c.shouldError, s3Secret, didError)
+		s3 := &S3Decrypter{}
+		err := s3.parse(c.params)
+		if assert.Equal(t, c.shouldError, err != nil) {
+			c.expected(t, s3)
 		}
 	}
 }
 
 func TestParseGcsSecret(t *testing.T) {
 	cases := []struct {
-		params      map[string]string
-		expected    GcsSecret
+		params      string
+		expected    func(*testing.T, *GcsDecrypter)
 		shouldError bool
 	}{
 		{
-			map[string]string{
-				"encrypted": "gcs",
-				"b":         "bucket",
-				"f":         "file",
-			},
-			GcsSecret{
-				bucket:   "bucket",
-				filepath: "file",
+			"b:bucket!f:file",
+			func(t *testing.T, decrypter *GcsDecrypter) {
+				assert.Equal(t, "bucket", decrypter.bucket)
+				assert.Equal(t, "file", decrypter.filepath)
 			},
 			false,
 		},
 		{
-			map[string]string{
-				"encrypted": "gcs",
-				"b":         "bucket",
-				"f":         "file",
-				"k":         "key",
-			},
-			GcsSecret{
-				bucket:   "bucket",
-				filepath: "file",
-				key:      "key",
+			"b:bucket!f:file!k:key",
+			func(t *testing.T, decrypter *GcsDecrypter) {
+				assert.Equal(t, "bucket", decrypter.bucket)
+				assert.Equal(t, "file", decrypter.filepath)
+				assert.Equal(t, "key", decrypter.key)
 			},
 			false,
 		},
 		{
-			map[string]string{
-				"encrypted": "gcs",
-				"b":         "bucket",
-			},
-			GcsSecret{},
+			"b:bucket",
+			func(t *testing.T, decrypter *GcsDecrypter) {},
 			true,
 		},
 	}
 
 	for _, c := range cases {
-		gcsSecret, err := ParseGcsSecret(c.params)
-		didError := (err != nil)
-		if didError != c.shouldError || gcsSecret != c.expected {
-			t.Errorf("for parseGcsEncryptedSecret(%s) -- expected %s with error=='%t' but got %s with error=='%t'",
-				c.params, c.expected, c.shouldError, gcsSecret, didError)
+		gcs := &GcsDecrypter{}
+		err := gcs.parse(c.params)
+		if assert.Equal(t, c.shouldError, err != nil) {
+			c.expected(t, gcs)
 		}
 	}
 }
@@ -179,27 +223,26 @@ func TestDecrypter(t *testing.T) {
 		expected     interface{}
 	}{
 		{
-			"encrypted:s3!b:bucket",
+			"encrypted:s3!b:bucket!r:us-west-2!f:file",
 			&S3Decrypter{},
 		},
 		{
-			"encrypted:gcs!b:bucket",
+			"encrypted:gcs!b:bucket!f:file",
 			&GcsDecrypter{},
 		},
 		{
-			"encrypted:vault!e:engine",
+			"encrypted:vault!e:engine!p:file!k:mykey",
 			&VaultDecrypter{},
 		},
 		{
 			"notASecret",
-			&NoopDecrypter{
-				value: "notASecret",
-			},
+			&NoopDecrypter{},
 		},
 	}
 
 	for _, c := range cases {
-		decrypter := NewDecrypter(c.secretConfig)
+		decrypter, err := NewDecrypter(context.TODO(), c.secretConfig)
+		assert.Nil(t, err)
 		if reflect.TypeOf(decrypter) != reflect.TypeOf(c.expected) {
 			t.Errorf("for parseS3EncryptedSecret(%s) -- expected type %s but got type %s",
 				c.secretConfig, reflect.TypeOf(c.expected), reflect.TypeOf(decrypter))
@@ -209,94 +252,67 @@ func TestDecrypter(t *testing.T) {
 
 func TestNoSecret(t *testing.T) {
 	notASecret := "notASecret"
-	noSecret := NewDecrypter(notASecret)
-	unchanged, _ := noSecret.Decrypt()
-	if unchanged != notASecret {
-		t.Errorf("for NoSecret.Decrypt(%s) -- expected unchanged string %q, but got %q",
-			notASecret, notASecret, unchanged)
-	}
+	eng, err := NewDecrypter(context.TODO(), notASecret)
+	assert.Nil(t, eng)
+	assert.Nil(t, err)
 }
 
 func TestNoVaultConfig(t *testing.T) {
-	decrypter := NewDecrypter("encrypted:vault!e:secret!n:test-secret!k:foo")
-	_, err := decrypter.Decrypt()
-	expectedError := "configuration not found"
-	if err == nil || !strings.Contains(err.Error(), expectedError) {
-		t.Errorf("attempting to Decrypt() without vault configured, expected error with %q but got: %q", expectedError, err)
-	}
+	e := Engines["vault"]
+	delete(Engines, "vault")
+	decrypter, err := NewDecrypter(context.TODO(), "encrypted:vault!e:secret!n:test-secret!k:foo")
+	assert.NotNil(t, err)
+	assert.Nil(t, decrypter)
+	Engines["vault"] = e
 }
 
 func TestParseVaultSecret(t *testing.T) {
 	cases := []struct {
-		params      map[string]string
-		expected    VaultSecret
+		params      string
+		expected    func(*testing.T, *VaultDecrypter)
 		shouldError bool
 	}{
 		{
-			map[string]string{
-				"encrypted": "vault",
-				"e":         "engine",
-				"n":         "path",
-				"k":         "key",
-			},
-			VaultSecret{
-				engine: "engine",
-				path:   "path",
-				key:    "key",
+			"e:engine!n:path!k:key",
+			func(t *testing.T, decrypter *VaultDecrypter) {
+				assert.Equal(t, "engine", decrypter.engine)
+				assert.Equal(t, "path", decrypter.path)
+				assert.Equal(t, "key", decrypter.key)
 			},
 			false,
 		},
 		{
-			map[string]string{
-				"encrypted": "vault",
-				"e":         "engine",
-				"n":         "path",
-				"k":         "key",
-				"b":         "true",
-			},
-			VaultSecret{
-				engine:        "engine",
-				path:          "path",
-				base64Encoded: "true",
-				key:           "key",
+			"e:engine!n:path!k:key!b:true",
+			func(t *testing.T, decrypter *VaultDecrypter) {
+				assert.Equal(t, "engine", decrypter.engine)
+				assert.Equal(t, "path", decrypter.path)
+				assert.Equal(t, "key", decrypter.key)
+				assert.Equal(t, "true", decrypter.base64Encoded)
 			},
 			false,
 		},
 		{
-			map[string]string{
-				"encrypted": "vault",
-				"n":         "path",
-				"k":         "key",
-			},
-			VaultSecret{},
+			"n:path!k:key",
+			func(t *testing.T, decrypter *VaultDecrypter) {},
 			true,
 		},
 		{
-			map[string]string{
-				"encrypted": "vault",
-				"e":         "engine",
-				"k":         "key",
-			},
-			VaultSecret{},
+			"e:engine!k:key",
+			func(t *testing.T, decrypter *VaultDecrypter) {},
 			true,
 		},
 		{
-			map[string]string{
-				"encrypted": "vault",
-				"e":         "engine",
-				"n":         "path",
-			},
-			VaultSecret{},
+			"e:engine!n:path",
+			func(t *testing.T, decrypter *VaultDecrypter) {},
 			true,
 		},
 	}
 
 	for _, c := range cases {
-		vaultSecret, err := parseVaultSecret(c.params)
-		didError := (err != nil)
-		if didError != c.shouldError || vaultSecret != c.expected {
-			t.Errorf("for parseS3EncryptedSecret(%s) -- expected %s with error=='%t' but got %s with error=='%t'",
-				c.params, c.expected, c.shouldError, vaultSecret, didError)
+		v := &VaultDecrypter{}
+		err := v.parse(c.params)
+		if assert.Equal(t, c.shouldError, err != nil) {
+			c.expected(t, v)
 		}
 	}
 }
