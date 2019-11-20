@@ -15,6 +15,9 @@ type NoopDecrypter struct {
 }
 
 func (n *NoopDecrypter) Decrypt() (string, error) {
+	if n.isFile {
+		return ToTempFile([]byte(n.value))
+	}
 	return n.value, nil
 }
 
