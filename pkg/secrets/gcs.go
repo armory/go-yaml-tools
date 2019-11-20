@@ -2,75 +2,84 @@ package secrets
 
 import (
 	"cloud.google.com/go/storage"
+	"context"
 	"fmt"
-	"golang.org/x/net/context"
 	"io/ioutil"
+	"strings"
 )
 
 type GcsSecret struct {
-	bucket   string
-	filepath string
-	key      string
 }
 
 type GcsDecrypter struct {
-	params map[string]string
-	ctx    context.Context
+	bucket   string
+	filepath string
+	key      string
+	ctx      context.Context
+	isFile   bool
 }
 
-func NewGcsDecrypter(params map[string]string) *GcsDecrypter {
-	return &GcsDecrypter{params: params, ctx: context.Background()}
+func NewGcsDecrypter(ctx context.Context, isFile bool, params string) (Decrypter, error) {
+	gcs := &GcsDecrypter{isFile: isFile, ctx: ctx}
+	if err := gcs.parse(params); err != nil {
+		return nil, err
+	}
+	return gcs, nil
 }
 
 func (gcs *GcsDecrypter) Decrypt() (string, error) {
-	gcsSecret, err := ParseGcsSecret(gcs.params)
-	if err != nil {
-		return "", err
+	sec, err := gcs.fetchSecret(gcs.ctx)
+	if err != nil || !gcs.isFile {
+		return sec, err
 	}
-	return gcsSecret.fetchSecret(gcs.ctx)
+	return ToTempFile([]byte(sec))
 }
 
-func ParseGcsSecret(params map[string]string) (GcsSecret, error) {
-	var gcsSecret GcsSecret
-
-	bucket, ok := params["b"]
-	if !ok {
-		return GcsSecret{}, fmt.Errorf("secret format error - 'b' for bucket is required")
-	}
-	gcsSecret.bucket = bucket
-
-	filepath, ok := params["f"]
-	if !ok {
-		return GcsSecret{}, fmt.Errorf("secret format error - 'f' for file is required")
-	}
-	gcsSecret.filepath = filepath
-
-	key, ok := params["k"]
-	if ok {
-		gcsSecret.key = key
-	}
-
-	return gcsSecret, nil
+func (gcs *GcsDecrypter) IsFile() bool {
+	return gcs.isFile
 }
 
-func (secret *GcsSecret) fetchSecret(ctx context.Context) (string, error) {
+func (gcs *GcsDecrypter) parse(params string) error {
+	tokens := strings.Split(params, "!")
+	for _, element := range tokens {
+		kv := strings.Split(element, ":")
+		if len(kv) == 2 {
+			switch kv[0] {
+			case "b":
+				gcs.bucket = kv[1]
+			case "f":
+				gcs.filepath = kv[1]
+			case "k":
+				gcs.key = kv[1]
+			}
+		}
+	}
+
+	if gcs.bucket == "" {
+		return fmt.Errorf("secret format error - 'b' for bucket is required")
+	}
+	if gcs.filepath == "" {
+		return fmt.Errorf("secret format error - 'f' for file is required")
+	}
+	return nil
+}
+
+func (gcs *GcsDecrypter) fetchSecret(ctx context.Context) (string, error) {
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return "", fmt.Errorf("unable to create GCS client: %s", err.Error())
 	}
-	bucket := client.Bucket(secret.bucket)
-	r, err := bucket.Object(secret.filepath).NewReader(ctx)
+	bucket := client.Bucket(gcs.bucket)
+	r, err := bucket.Object(gcs.filepath).NewReader(ctx)
 	if err != nil {
-		return "", fmt.Errorf("unable to get reader for bucket: %s, file: %s, error: %v", secret.bucket, secret.filepath, err)
+		return "", fmt.Errorf("unable to get reader for bucket: %s, file: %s, error: %v", gcs.bucket, gcs.filepath, err)
 	}
 	b, err := ioutil.ReadAll(r)
 	if err != nil {
-		return "", fmt.Errorf("unable to download file from bucket: %s, file: %s, error: %v", secret.bucket, secret.filepath, err)
+		return "", fmt.Errorf("unable to download file from bucket: %s, file: %s, error: %v", gcs.bucket, gcs.filepath, err)
 	}
-
-	if len(secret.key) > 0 {
-		return parseSecretFile(b, secret.key)
+	if len(gcs.key) > 0 {
+		return parseSecretFile(b, gcs.key)
 	}
-
 	return string(b), nil
 }
