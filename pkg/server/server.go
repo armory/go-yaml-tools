@@ -57,7 +57,7 @@ func (s *Server) startTls(router http.Handler) error {
 		if caFile == "" {
 			// Fall back to cert file - could be a combined PEM (e.g. self signed)
 			caFile = s.config.Ssl.CertFile
-		} else if err := checkFileReadable(caFile); err != nil {
+		} else if err := checkFileExists(caFile); err != nil {
 			return fmt.Errorf("error with certificate authority file %s: %w", caFile, err)
 		}
 
@@ -101,7 +101,7 @@ func (s *Server) getClientCertMode() tls.ClientAuthType {
 	}
 }
 
-func checkFileReadable(filename string) error {
+func checkFileExists(filename string) error {
 	if secrets.IsEncryptedSecret(filename) {
 		d, err := secrets.NewDecrypter(context.TODO(), filename)
 		if err != nil {
@@ -115,22 +115,18 @@ func checkFileReadable(filename string) error {
 			return err
 		}
 	}
-	info, err := os.Stat(filename)
+	_, err := os.Stat(filename)
 	if os.IsNotExist(err) {
 		return err
 	}
-	m := info.Mode()
-	if m&(1<<2) != 0 {
-		return nil
-	}
-	return fmt.Errorf("file %s is not readable", filename)
+	return nil
 }
 
 // tlsConfig prepares the TLS config of the server
 // certFile must contain the certificate of the server. It can also contain the private key (optionally encrypted)
 // keyFile is needed if the certFile doesn't contain the private key. It can also be encrypted.
 func (s *Server) tlsConfig() (*tls.Config, error) {
-	if err := checkFileReadable(s.config.Ssl.CertFile); err != nil {
+	if err := checkFileExists(s.config.Ssl.CertFile); err != nil {
 		return nil, fmt.Errorf("error with certificate file %s: %w", s.config.Ssl.CertFile, err)
 	}
 
@@ -160,7 +156,7 @@ func (s *Server) tlsConfig() (*tls.Config, error) {
 
 // getPrivateKey attempts to load and decrypt the private key if needed
 func (s *Server) getPrivateKey() ([]byte, error) {
-	if err := checkFileReadable(s.config.Ssl.KeyFile); err != nil {
+	if err := checkFileExists(s.config.Ssl.KeyFile); err != nil {
 		return nil, fmt.Errorf("error with key file %s: %w", s.config.Ssl.KeyFile, err)
 	}
 	b, err := ioutil.ReadFile(s.config.Ssl.KeyFile)

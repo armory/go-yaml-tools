@@ -4,7 +4,7 @@ import "fmt"
 
 type ServerConfig struct {
 	Host string `yaml:"host"`
-	Port int32  `yaml:"port"`
+	Port uint32 `yaml:"port"`
 	Ssl  Ssl    `yaml:"ssl"`
 }
 
