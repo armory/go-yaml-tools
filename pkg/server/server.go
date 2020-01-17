@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"github.com/armory/go-yaml-tools/pkg/secrets"
 	"io/ioutil"
@@ -105,6 +106,9 @@ func checkFileReadable(filename string) error {
 		d, err := secrets.NewDecrypter(context.TODO(), filename)
 		if err != nil {
 			return err
+		}
+		if !d.IsFile() {
+			return errors.New("no file referenced, use encryptedFile")
 		}
 		filename, err = d.Decrypt()
 		if err != nil {
