@@ -76,14 +76,14 @@ func (s *Server) startTls(router http.Handler) error {
 	tlsConfig.BuildNameToCertificate()
 
 	// Create a Server instance to listen on port 8443 with the TLS config
-	server := &http.Server{
+	s.server = &http.Server{
 		Addr:      s.config.GetAddr(),
 		Handler:   router,
 		TLSConfig: tlsConfig,
 	}
 
 	// Listen to HTTPS connections with the server certificate and wait
-	return server.ListenAndServeTLS("", "")
+	return s.server.ListenAndServeTLS("", "")
 }
 
 func (s *Server) getClientCertMode() tls.ClientAuthType {
