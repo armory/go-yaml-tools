@@ -136,12 +136,15 @@ func loadProperties(propNames []string, confDir string, profiles []string, envMa
 	for _, prop := range propNames {
 		// yaml is "official"
 		filePath := fmt.Sprintf("%s/%s.yaml", confDir, prop)
-		propMaps = append(propMaps, loadConfig(filePath))
+		config := loadConfig(filePath)
 
-		// but people also use "yml" too
-		filePath = fmt.Sprintf("%s/%s.yml", confDir, prop)
-		propMaps = append(propMaps, loadConfig(filePath))
+		// but people also use "yml" too, if we don't get anything let's try this
+		if len(config) == 0 {
+			filePath = fmt.Sprintf("%s/%s.yml", confDir, prop)
+			config = loadConfig(filePath)
+		}
 
+		propMaps = append(propMaps, config)
 	}
 
 	for _, prop := range propNames {
