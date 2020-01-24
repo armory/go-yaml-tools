@@ -22,6 +22,18 @@ func TestSubValues(t *testing.T) {
 	assert.Equal(t, "true", spinnaker["default"])
 }
 
+func TestGetYAMLConfigFilesToo(t *testing.T) {
+	wd, _ := os.Getwd()
+	configDir := fmt.Sprintf("%s/../../test/springconf/", wd)
+
+	propNames := []string{"clouddriver"}
+	envPairs := []string{"SPRING_PROFILES_ACTIVE=armory,local"}
+	props, _ := LoadProperties(propNames, configDir, envPairs)
+	clouddriver := props["clouddriver"].(map[string]interface{})
+	fmt.Println(clouddriver[""])
+	assert.Equal(t, "true", clouddriver["testValue"])
+}
+
 func TestDefaults(t *testing.T) {
 	mockFs := afero.NewMemMapFs()
 	mockFs.MkdirAll("/home/spinnaker/config", 0755)
