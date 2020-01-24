@@ -4,7 +4,7 @@ go 1.13
 
 require (
 	cloud.google.com/go/storage v1.1.1
-	github.com/aws/aws-sdk-go v1.25.8
+	github.com/aws/aws-sdk-go v1.28.9
 	github.com/frankban/quicktest v1.4.1 // indirect
 	github.com/golang/groupcache v0.0.0-20191002201903-404acd9df4cc // indirect
 	github.com/google/go-cmp v0.3.1 // indirect
