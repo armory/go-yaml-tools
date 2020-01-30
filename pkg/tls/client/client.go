@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-func (c *ClientConfig) NewClient() *http.Client {
+func (c *Config) NewClient() *http.Client {
 	// Create a CA certificate pool and add cert.pem to it
 	client := &http.Client{}
 	if c.tlsConf != nil {
@@ -16,6 +16,6 @@ func (c *ClientConfig) NewClient() *http.Client {
 	return client
 }
 
-func (c *ClientConfig) GetTlsConfig() *tls.Config {
+func (c *Config) GetTlsConfig() *tls.Config {
 	return c.tlsConf
 }

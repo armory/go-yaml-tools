@@ -8,7 +8,7 @@ import (
 	"io/ioutil"
 )
 
-type ClientConfig struct {
+type Config struct {
 	CacertFile        string `yaml:"cacertFile"`
 	ClientCertFile    string `yaml:"clientCertFile"`
 	ClientKeyFile     string `yaml:"clientKeyFile"`
@@ -17,7 +17,7 @@ type ClientConfig struct {
 	tlsConf *tls.Config
 }
 
-func (c *ClientConfig) Init() error {
+func (c *Config) Init() error {
 	var caCertPool *x509.CertPool
 	var clientCert tls.Certificate
 	var err error
