@@ -9,29 +9,33 @@ import (
 )
 
 type AwsSecretsManagerClient interface {
-	FetchSecret(region string, secretName string) (*secretsmanager.GetSecretValueOutput, error)
+	FetchSecret(secretName string) (*secretsmanager.GetSecretValueOutput, error)
 }
 
-type AwsSecretsManagerClientImpl struct{}
-
-func NewAwsSecretsManagerClient() AwsSecretsManagerClient {
-	return &AwsSecretsManagerClientImpl{}
+type AwsSecretsManagerClientImpl struct{
+	secretsManager *secretsmanager.SecretsManager
 }
 
-func (a *AwsSecretsManagerClientImpl) FetchSecret(region string, secretName string) (*secretsmanager.GetSecretValueOutput, error) {
+func NewAwsSecretsManagerClient(region string) (AwsSecretsManagerClient, error) {
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String(region),
 	})
 	if err != nil {
 		return nil, err
 	}
+	secretsManager := secretsmanager.New(sess)
+	client := &AwsSecretsManagerClientImpl{
+		secretsManager: secretsManager,
+	}
+	return client, nil
+}
 
-	sm := secretsmanager.New(sess)
-	input := &secretsmanager.GetSecretValueInput{
+func (a *AwsSecretsManagerClientImpl) FetchSecret(secretName string) (*secretsmanager.GetSecretValueOutput, error) {
+	request := &secretsmanager.GetSecretValueInput{
 		SecretId: aws.String(secretName),
 	}
 
-	result, err := sm.GetSecretValue(input)
+	result, err := a.secretsManager.GetSecretValue(request)
 
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {

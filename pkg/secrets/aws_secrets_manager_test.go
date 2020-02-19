@@ -15,7 +15,7 @@ type MockAwsSecretsManagerClient struct {
 	payload string
 }
 
-func (m *MockAwsSecretsManagerClient) FetchSecret(region string, secretName string) (*secretsmanager.GetSecretValueOutput, error) {
+func (m *MockAwsSecretsManagerClient) FetchSecret(secretName string) (*secretsmanager.GetSecretValueOutput, error) {
 	mockPayloadBytes, _ := ioutil.ReadFile("../../test/aws-secrets-manager/" + m.payload)
 	res := &secretsmanager.GetSecretValueOutput{}
 	err := json.Unmarshal(mockPayloadBytes, res)

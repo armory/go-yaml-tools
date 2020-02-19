@@ -28,15 +28,20 @@ type AwsSecretsManagerDecrypter struct {
 }
 
 func NewAwsSecretsManagerDecrypter(ctx context.Context, isFile bool, params string) (Decrypter, error) {
-	awsSMDecrypter := &AwsSecretsManagerDecrypter{isFile: isFile, awsSecretsManagerClient: NewAwsSecretsManagerClient()}
+	awsSMDecrypter := &AwsSecretsManagerDecrypter{isFile: isFile}
 	if err := awsSMDecrypter.parse(params); err != nil {
 		return nil, err
 	}
+	smClient, err := NewAwsSecretsManagerClient(awsSMDecrypter.region)
+	if err != nil {
+		return nil, err
+	}
+	awsSMDecrypter.awsSecretsManagerClient = smClient
 	return awsSMDecrypter, nil
 }
 
 func (a *AwsSecretsManagerDecrypter) Decrypt() (string, error) {
-	secretValue, err := a.awsSecretsManagerClient.FetchSecret(a.region, a.secretName)
+	secretValue, err := a.awsSecretsManagerClient.FetchSecret(a.secretName)
 	if err != nil {
 		return "", err
 	}
@@ -48,7 +53,7 @@ func (a *AwsSecretsManagerDecrypter) Decrypt() (string, error) {
 			return parsePlaintextFile(secretValue)
 		}
 	} else if a.secretKey != "" { // The secret is assumed to be a k,v pair return the v
-		return parseSecretKVPair(secretValue, &a.secretKey)
+		return parseSecretKVPair(secretValue, a.secretKey)
 	} else { // The secret is assumed to be a plaintext value return the value
 		return parseSecretValue(secretValue)
 	}
@@ -116,7 +121,7 @@ func parseSecretValue(secretValue *secretsmanager.GetSecretValueOutput) (string,
 	return *secretValue.SecretString, nil
 }
 
-func parseSecretKVPair(secretValue *secretsmanager.GetSecretValueOutput, key *string) (string, error) {
+func parseSecretKVPair(secretValue *secretsmanager.GetSecretValueOutput, key string) (string, error) {
 	if secretValue.SecretString == nil {
 		return "", fmt.Errorf(MalformedKVPairSecretPayload)
 	}
@@ -128,7 +133,7 @@ func parseSecretKVPair(secretValue *secretsmanager.GetSecretValueOutput, key *st
 		return "", fmt.Errorf(MalformedKVPairSecretPayload)
 	}
 
-	untypedValue := kvPairs[*key]
+	untypedValue := kvPairs[key]
 	valueForKeyAsString, ok := untypedValue.(string)
 	if !ok {
 		return "", fmt.Errorf(MalformedKVPairSecretPayload)
