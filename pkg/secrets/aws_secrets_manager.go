@@ -49,14 +49,16 @@ func (a *AwsSecretsManagerDecrypter) Decrypt() (string, error) {
 	if a.isFile { // The secret is assumed to be a file so extract the binary data from the secretValue
 		if len(secretValue.SecretBinary) > 0 { // if the binary data has bytes then its a binary blob
 			return parseBinaryFile(secretValue)
-		} else { // else assume its a plaintext payload for a new file.
-			return parsePlaintextFile(secretValue)
 		}
+		// else assume its a plaintext payload for a new file.
+		return parsePlaintextFile(secretValue)
+
 	} else if a.secretKey != "" { // The secret is assumed to be a k,v pair return the v
 		return parseSecretKVPair(secretValue, a.secretKey)
-	} else { // The secret is assumed to be a plaintext value return the value
-		return parseSecretValue(secretValue)
 	}
+
+	// The secret is assumed to be a plaintext value return the value
+	return parseSecretValue(secretValue)
 }
 
 func (a *AwsSecretsManagerDecrypter) IsFile() bool {
