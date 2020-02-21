@@ -102,6 +102,10 @@ func TestResolver(t *testing.T) {
 	fiatURL := services["fiat"].(map[string]interface{})["baseUrl"]
 	assert.Equal(t, "http://mockdns.com:7003", fiatURL)
 
+	//secret resolve
+	echoSlackApiKey := services["echo"].(map[string]interface{})["slackApiKey"]
+	assert.Equal(t, "mynotsosecretstring", echoSlackApiKey)
+
 	//empty url
 	project := google["primaryCredentials"].(map[string]interface{})["project"]
 	assert.Equal(t, "", project)
