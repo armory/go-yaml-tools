@@ -1,7 +1,9 @@
 package yaml
 
 import (
+	"context"
 	"fmt"
+	"github.com/armory/go-yaml-tools/pkg/secrets"
 	"regexp"
 	"strings"
 
@@ -23,7 +25,12 @@ func Resolve(ymlTemplates []map[interface{}]interface{}, envKeyPairs map[string]
 	}
 	stringMap := convertToStringMap(mergedMap)
 
-	subValues(stringMap, stringMap, envKeyPairs)
+	err := subValues(stringMap, stringMap, envKeyPairs)
+
+	if err != nil {
+		return nil, err
+	}
+
 	return stringMap, nil
 }
 
@@ -53,7 +60,7 @@ func convertToStringMap(m map[interface{}]interface{}) map[string]interface{} {
 	return newMap
 }
 
-func subValues(fullMap map[string]interface{}, subMap map[string]interface{}, env map[string]string) {
+func subValues(fullMap map[string]interface{}, subMap map[string]interface{}, env map[string]string) error {
 	//responsible for finding all variables that need to be substituted
 	keepResolving := true
 	loops := 0
@@ -63,9 +70,23 @@ func subValues(fullMap map[string]interface{}, subMap map[string]interface{}, en
 		for k, value := range subMap {
 			switch value.(type) {
 			case map[string]interface{}:
-				subValues(fullMap, value.(map[string]interface{}), env)
+				err := subValues(fullMap, value.(map[string]interface{}), env)
+				if err != nil {
+					return err
+				}
 			case string:
 				valStr := value.(string)
+
+				secret, wasSecret, err := resolveSecret(valStr)
+				if err != nil {
+					return err
+				}
+
+				if wasSecret {
+					subMap[k] = secret
+					continue
+				}
+
 				keys := re.FindAllStringSubmatch(valStr, -1)
 				for _, keyToSub := range keys {
 					resolvedValue := resolveSubs(fullMap, keyToSub[1], env)
@@ -74,6 +95,25 @@ func subValues(fullMap map[string]interface{}, subMap map[string]interface{}, en
 			}
 		}
 	}
+	return nil
+}
+
+func resolveSecret(valStr string) (string, bool, error) {
+	// if the value is a secret resolve it
+	if secrets.IsEncryptedSecret(valStr) {
+		d, err := secrets.NewDecrypter(context.TODO(), valStr)
+		if err != nil {
+			return "", true, err
+		}
+
+		secret, err := d.Decrypt()
+		if err != nil {
+			return "", true, err
+		}
+
+		return secret, true, nil
+	}
+	return valStr, false, nil
 }
 
 func resolveSubs(m map[string]interface{}, keyToSub string, env map[string]string) string {
