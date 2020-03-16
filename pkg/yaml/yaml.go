@@ -3,9 +3,10 @@ package yaml
 import (
 	"context"
 	"fmt"
-	"github.com/armory/go-yaml-tools/pkg/secrets"
 	"regexp"
 	"strings"
+
+	"github.com/armory/go-yaml-tools/pkg/secrets"
 
 	"github.com/imdario/mergo"
 	log "github.com/sirupsen/logrus"
@@ -71,6 +72,15 @@ func subValues(fullMap map[string]interface{}, subMap map[string]interface{}, en
 			switch value.(type) {
 			case map[string]interface{}:
 				err := subValues(fullMap, value.(map[string]interface{}), env)
+				if err != nil {
+					return err
+				}
+			case []interface{}:
+				sliceMap := make(map[string]interface{})
+				for i := 0; i < len(value.([]interface{})); i++ {
+					sliceMap[string(i)] = value.([]interface{})[i]
+				}
+				err := subValues(fullMap, sliceMap, env)
 				if err != nil {
 					return err
 				}
