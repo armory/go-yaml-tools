@@ -1,13 +1,13 @@
 package yaml
 
 import (
-"fmt"
-"io/ioutil"
-"os"
-"testing"
+	"fmt"
+	"io/ioutil"
+	"os"
+	"testing"
 
-"github.com/stretchr/testify/assert"
-yaml "gopkg.in/yaml.v2"
+	"github.com/stretchr/testify/assert"
+	yaml "gopkg.in/yaml.v2"
 )
 
 func check(t *testing.T, e error) {
@@ -105,6 +105,8 @@ func TestResolver(t *testing.T) {
 	//secret resolve
 	echoSlackApiKey := services["echo"].(map[string]interface{})["slackApiKey"]
 	assert.Equal(t, "mynotsosecretstring", echoSlackApiKey)
+	terraformerProfilesSSHKey := services["terraformer"].(map[string]interface{})["profiles"].([]interface{})[0].(map[string]interface{})["variables"].([]interface{})[0].(map[string]interface{})["options"].(map[string]interface{})["sshKeyContents"]
+	assert.Equal(t, "mynotsosecretsshstring", terraformerProfilesSSHKey)
 
 	//empty url
 	project := google["primaryCredentials"].(map[string]interface{})["project"]
@@ -133,7 +135,7 @@ func TestResolverCollections(t *testing.T) {
 	}
 
 	assert.Equal(t, "http://localhost:8080", resolved["baseUrl"])
-	assert.Equal(t, []interface{}{map[string]interface{}{"multi_one_one":"one-one", "multi_one_two":"one-two"}, map[string]interface{}{"multi_two_one":"two-one", "multi_two_two":"two-two"}}, resolved["multiValCol"])
-	assert.Equal(t, []interface{}{map[string]interface{}{"multi_one_one":"one-one", "multi_one_two":"one-two"}, map[string]interface{}{"multi_two_one":"two-one", "multi_two_two":"two-two"}}, resolved["multiValColAgain"])
+	assert.Equal(t, []interface{}{map[string]interface{}{"multi_one_one": "one-one", "multi_one_two": "one-two"}, map[string]interface{}{"multi_two_one": "two-one", "multi_two_two": "two-two"}}, resolved["multiValCol"])
+	assert.Equal(t, []interface{}{map[string]interface{}{"multi_one_one": "one-one", "multi_one_two": "one-two"}, map[string]interface{}{"multi_two_one": "two-one", "multi_two_two": "two-two"}}, resolved["multiValColAgain"])
 	assert.Equal(t, []interface{}{"one", "two", "three"}, resolved["col"])
 }

@@ -41,6 +41,14 @@ services:
     port: 6379
     connection: redis://${services.redis.host}:${services.redis.port}
 
+  terraformer:
+    profiles:
+      - name: default
+        variables:
+          - kind: git-ssh
+            options:
+              sshKeyContents: encrypted:noop!mynotsosecretsshstring
+
 providers:
   aws:
     enabled: ${SPINNAKER_AWS_ENABLED:true}
