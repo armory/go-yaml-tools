@@ -16,7 +16,7 @@ const (
 	EncryptedFilesShouldNotSpecifyKeyError = "Encrypted files for AWS Secrets Manager should not include the !k:<some-params> token. Point to a binary secret in AWS Secrets Manager."
 	RegionMissingError                     = "Secret format error - 'r' for the AWS region where the secret is stored is required."
 	SecretNameMissingError                 = "Secret format error - 's' for the secret name is required."
-	MalformedKVPairSecretPayload           = "Malformed key-value pair secret payload. Expected the payload to be a parameter value pair map of type: map[string]string"
+	MalformedKVPairSecretPayload           = "Malformed key-value pair secret payload. Expected the payload to be a parameter value pair map of type: map[string]string."
 )
 
 type AwsSecretsManagerDecrypter struct {
