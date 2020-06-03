@@ -253,8 +253,10 @@ func TestDecrypter(t *testing.T) {
 func TestNoSecret(t *testing.T) {
 	notASecret := "notASecret"
 	eng, err := NewDecrypter(context.TODO(), notASecret)
-	assert.Nil(t, eng)
 	assert.Nil(t, err)
+
+	unchanged, _ := eng.Decrypt()
+	assert.Equal(t, notASecret, unchanged)
 }
 
 func TestNoVaultConfig(t *testing.T) {
