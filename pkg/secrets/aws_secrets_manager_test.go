@@ -87,6 +87,12 @@ func TestNewAwsSecretsManagerDecrypter(t *testing.T) {
 			expectedError: "",
 			isFile: false,
 		},
+		{
+			name: "secret references full secret ARN",
+			params: "r:some-region!s:my:secret/path/some-secret!k:some-key",
+			expectedError: "",
+			isFile: false,
+		},
 	}
 
 	for _, c := range cases {
