@@ -10,6 +10,7 @@ require (
 	github.com/google/go-cmp v0.3.1 // indirect
 	github.com/hashicorp/go-retryablehttp v0.6.2 // indirect
 	github.com/hashicorp/vault/api v1.0.5-0.20190909201928-35325e2c3262
+	github.com/hashicorp/vault/sdk v0.1.14-0.20190909201848-e0fbf9b652e2
 	github.com/imdario/mergo v0.3.5
 	github.com/jstemmer/go-junit-report v0.9.1 // indirect
 	github.com/mitchellh/mapstructure v1.1.2

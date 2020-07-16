@@ -31,6 +31,7 @@ type VaultConfig struct {
 	AuthMethod string `json:"authMethod" yaml:"authMethod"`
 	Role       string `json:"role" yaml:"role"`
 	Path       string `json:"path" yaml:"path"`
+	Namespace  string `json:"namespace" yaml:"namespace"`
 	Token      string
 }
 
@@ -163,6 +164,9 @@ func (decrypter *VaultDecrypter) fetchServiceAccountToken() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("error fetching vault client: %s", err)
 	}
+	if decrypter.vaultConfig.Namespace != "" {
+		client.SetNamespace(decrypter.vaultConfig.Namespace)
+	}
 
 	tokenFile, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
 	if err != nil {
@@ -190,6 +194,9 @@ func (decrypter *VaultDecrypter) FetchVaultClient(token string) (*api.Client, er
 		return nil, err
 	}
 	client.SetToken(token)
+	if decrypter.vaultConfig.Namespace != "" {
+		client.SetNamespace(decrypter.vaultConfig.Namespace)
+	}
 	return client, nil
 }
 
