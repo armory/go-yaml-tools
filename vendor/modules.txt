@@ -57,6 +57,8 @@ github.com/aws/aws-sdk-go/service/sts
 github.com/aws/aws-sdk-go/service/sts/stsiface
 # github.com/davecgh/go-spew v1.1.1
 github.com/davecgh/go-spew/spew
+# github.com/fsnotify/fsnotify v1.4.9
+github.com/fsnotify/fsnotify
 # github.com/golang/groupcache v0.0.0-20191002201903-404acd9df4cc
 github.com/golang/groupcache/lru
 # github.com/golang/protobuf v1.3.2
