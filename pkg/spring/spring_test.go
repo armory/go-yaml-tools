@@ -1,10 +1,13 @@
 package spring
 
 import (
+	"context"
 	"fmt"
 	"github.com/mitchellh/mapstructure"
+	"io/ioutil"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -46,6 +49,10 @@ spinnaker:
 	// might need to move this into a struct instead of keeping it at the
 	// package level.
 	fs = mockFs
+	defer func() {
+		fs = afero.NewOsFs()
+	}()
+
 	props, err := LoadDefault([]string{"spinnaker"})
 	assert.Nil(t, err)
 	spinnaker := props["spinnaker"].(map[string]interface{})
@@ -71,6 +78,9 @@ services:
 	// might need to move this into a struct instead of keeping it at the
 	// package level.
 	fs = mockFs
+	defer func() {
+		fs = afero.NewOsFs()
+	}()
 	os.Setenv("SPINNAKER_DEFAULT_STORAGE_BUCKET", "mybucket2")
 	os.Setenv("ARMORYSPINNAKER_CONF_STORE_BUCKET", "mybucket")
 	props, err := LoadDefault([]string{"spinnaker"})
@@ -89,5 +99,88 @@ services:
 }
 
 func TestConfigDirs(t *testing.T) {
-	assert.Equal(t, len(defaultConfigDirs), 4)
+	env := springEnv{}
+	env.initialize()
+	assert.Equal(t, len(env.defaultConfigDirs), 4)
+}
+
+func TestWatch(t *testing.T) {
+	// We don't use the in-memory file system because we rely on watch
+	dir, err := ioutil.TempDir("", "spring-test")
+	if !assert.Nil(t, err) {
+		return
+	}
+
+	defer os.RemoveAll(dir)
+
+	file1 := dir + "/spinnaker.yaml"
+	file2 := dir + "/gate.yml"
+
+	assert.Nil(t, ioutil.WriteFile(file1, []byte("foo: bar"), 0644))
+	assert.Nil(t, ioutil.WriteFile(file2, []byte("foo: baz"), 0644))
+
+	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.TODO())
+	env := springEnv{configDir: dir}
+	c, err := loadDefaultDynamicWithEnv(env, ctx, []string{"gate"}, func(cfg map[string]interface{}, err error) {
+		assert.Equal(t, "bat", cfg["foo"])
+		done <- struct{}{}
+	})
+
+	assert.Nil(t, err)
+	assert.Equal(t, "baz", c["foo"])
+
+	// Wait a bit to be sure the watcher is watching
+	time.Sleep(500 * time.Millisecond)
+	ioutil.WriteFile(file2, []byte("foo: bat"), 0644)
+
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+			fmt.Println("time out reached")
+			close(done)
+		case <-done:
+			cancel()
+			return
+		}
+	}
+}
+
+func TestWatchSymLink(t *testing.T) {
+	dir, err := ioutil.TempDir("", "spring-test")
+	if !assert.Nil(t, err) {
+		return
+	}
+	defer os.RemoveAll(dir)
+
+	file := dir + "/gate-real.yml"
+	newFile := dir + "/gate.yml"
+
+	assert.Nil(t, ioutil.WriteFile(file, []byte("foo: bar"), 0644))
+	os.Symlink(file, newFile)
+
+	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.TODO())
+	env := springEnv{configDir: dir}
+	c, err := loadDefaultDynamicWithEnv(env, ctx, []string{"gate"}, func(cfg map[string]interface{}, err error) {
+		assert.Equal(t, "bat", cfg["foo"])
+		done <- struct{}{}
+	})
+
+	assert.Nil(t, err)
+	assert.Equal(t, "bar", c["foo"])
+
+	// Wait a bit to be sure the watcher is watching
+	time.Sleep(500 * time.Millisecond)
+	ioutil.WriteFile(file, []byte("foo: bat"), 0644)
+
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+			close(done)
+		case <-done:
+			cancel()
+			return
+		}
+	}
 }

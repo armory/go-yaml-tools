@@ -6,6 +6,7 @@ require (
 	cloud.google.com/go/storage v1.1.1
 	github.com/aws/aws-sdk-go v1.28.9
 	github.com/frankban/quicktest v1.4.1 // indirect
+	github.com/fsnotify/fsnotify v1.4.9
 	github.com/golang/groupcache v0.0.0-20191002201903-404acd9df4cc // indirect
 	github.com/google/go-cmp v0.3.1 // indirect
 	github.com/hashicorp/go-retryablehttp v0.6.2 // indirect
@@ -23,7 +24,7 @@ require (
 	golang.org/x/exp v0.0.0-20191002040644-a1355ae1e2c3 // indirect
 	golang.org/x/lint v0.0.0-20190930215403-16217165b5de // indirect
 	golang.org/x/net v0.0.0-20191007182048-72f939374954 // indirect
-	golang.org/x/sys v0.0.0-20190813064441-fde4db37ae7a // indirect
+	golang.org/x/sys v0.0.0-20200805065543-0cf7623e9dbd // indirect
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0 // indirect
 	golang.org/x/tools v0.0.0-20191007185444-6536af71d98a // indirect
 	google.golang.org/api v0.11.0 // indirect
