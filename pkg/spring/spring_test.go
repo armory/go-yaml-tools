@@ -184,3 +184,36 @@ func TestWatchSymLink(t *testing.T) {
 		}
 	}
 }
+
+func Test_logFsStatError(t *testing.T) {
+	a := afero.NewOsFs()
+	_, err := a.Stat("/root/.missingfile__")
+	if !assert.True(t, os.IsNotExist(err)) {
+		return
+	}
+	logFsStatError(err, "")
+
+	a = afero.NewBasePathFs(afero.NewOsFs(), "/tmp")
+	dir := "test"
+	file := "test/test"
+	err = a.Mkdir(dir, 0755)
+	if !assert.NoError(t, err) {
+		return
+	}
+	f, err := a.Create(file)
+	if !assert.NoError(t, err) {
+		return
+	}
+	_ = f.Close()
+
+	err = a.Chmod(dir, 0222)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	_, err = a.Stat(file)
+	if !assert.Error(t, err) {
+		return
+	}
+	logFsStatError(err, "")
+}
