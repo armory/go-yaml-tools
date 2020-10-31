@@ -1,9 +1,12 @@
 package spring
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"github.com/mitchellh/mapstructure"
+	"github.com/sirupsen/logrus"
+	"io"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -193,12 +196,18 @@ func Test_logFsStatError(t *testing.T) {
 	}
 	defer fs.RemoveAll(tempDir)
 
+	var buf bytes.Buffer
+	logrus.SetOutput(io.MultiWriter(os.Stderr, &buf))
+
 	a := afero.NewBasePathFs(fs, tempDir)
 	_, err = a.Stat(".missingfile__")
 	if !assert.True(t, os.IsNotExist(err)) {
 		return
 	}
 	logFsStatError(err, "")
+	if !assert.Len(t, buf.String(), 0) {
+		return
+	}
 
 	dir := "test"
 	file := "test/test"
@@ -222,4 +231,7 @@ func Test_logFsStatError(t *testing.T) {
 		return
 	}
 	logFsStatError(err, "")
+	if !assert.Contains(t, buf.String(), "level=error") {
+		return
+	}
 }
