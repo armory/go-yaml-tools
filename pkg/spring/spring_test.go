@@ -196,6 +196,8 @@ func Test_logFsStatError(t *testing.T) {
 	}
 	defer fs.RemoveAll(tempDir)
 
+	previousOut := logrus.StandardLogger().Out
+	defer logrus.SetOutput(previousOut)
 	var buf bytes.Buffer
 	logrus.SetOutput(io.MultiWriter(os.Stderr, &buf))
 
