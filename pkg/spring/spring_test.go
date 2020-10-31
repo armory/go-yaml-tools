@@ -186,14 +186,20 @@ func TestWatchSymLink(t *testing.T) {
 }
 
 func Test_logFsStatError(t *testing.T) {
-	a := afero.NewOsFs()
-	_, err := a.Stat("/root/.missingfile__")
+	fs := afero.NewOsFs()
+	tempDir, err := afero.TempDir(fs, "/tmp", "testfstaterror")
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer fs.RemoveAll(tempDir)
+
+	a := afero.NewBasePathFs(fs, tempDir)
+	_, err = a.Stat(".missingfile__")
 	if !assert.True(t, os.IsNotExist(err)) {
 		return
 	}
 	logFsStatError(err, "")
 
-	a = afero.NewBasePathFs(afero.NewOsFs(), "/tmp")
 	dir := "test"
 	file := "test/test"
 	err = a.Mkdir(dir, 0755)
