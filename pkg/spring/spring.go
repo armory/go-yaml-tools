@@ -79,9 +79,17 @@ func loadConfig(configFile string) map[interface{}]interface{} {
 		}
 		log.Info("Configured with settings from file: ", configFile)
 	} else {
-		log.WithError(err).Info("Config file ", configFile, " not present; falling back to default settings")
+		logFsStatError(err, "Config file ", configFile, " not present; falling back to default settings")
 	}
 	return s
+}
+
+func logFsStatError(err error, args ...interface{}) {
+	if os.IsNotExist(err) {
+		log.WithError(err).Debug(args...)
+		return
+	}
+	log.WithError(err).Error(args...)
 }
 
 //LoadProperties tries to do what spring properties manages by loading files

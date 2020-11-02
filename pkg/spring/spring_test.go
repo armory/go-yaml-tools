@@ -1,9 +1,12 @@
 package spring
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"github.com/mitchellh/mapstructure"
+	"github.com/sirupsen/logrus"
+	"io"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -182,5 +185,55 @@ func TestWatchSymLink(t *testing.T) {
 			cancel()
 			return
 		}
+	}
+}
+
+func Test_logFsStatError(t *testing.T) {
+	fs := afero.NewOsFs()
+	tempDir, err := afero.TempDir(fs, "/tmp", "testfstaterror")
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer fs.RemoveAll(tempDir)
+
+	previousOut := logrus.StandardLogger().Out
+	defer logrus.SetOutput(previousOut)
+	var buf bytes.Buffer
+	logrus.SetOutput(io.MultiWriter(os.Stderr, &buf))
+
+	a := afero.NewBasePathFs(fs, tempDir)
+	_, err = a.Stat(".missingfile__")
+	if !assert.True(t, os.IsNotExist(err)) {
+		return
+	}
+	logFsStatError(err, "")
+	if !assert.Len(t, buf.String(), 0) {
+		return
+	}
+
+	dir := "test"
+	file := "test/test"
+	err = a.Mkdir(dir, 0755)
+	if !assert.NoError(t, err) {
+		return
+	}
+	f, err := a.Create(file)
+	if !assert.NoError(t, err) {
+		return
+	}
+	_ = f.Close()
+
+	err = a.Chmod(dir, 0222)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	_, err = a.Stat(file)
+	if !assert.Error(t, err) {
+		return
+	}
+	logFsStatError(err, "")
+	if !assert.Contains(t, buf.String(), "level=error") {
+		return
 	}
 }
