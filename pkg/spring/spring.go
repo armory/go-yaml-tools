@@ -75,7 +75,7 @@ func loadConfig(configFile string) (map[interface{}]interface{}, error) {
 		}
 		if err = yamlParse.Unmarshal(bytes, &s); err != nil {
 			log.Errorf("Unable to parse config file %s: %v", configFile, err)
-			return s, err
+			return s, fmt.Errorf("unable to parse config file %s: %w", configFile, err)
 		}
 		log.Info("Configured with settings from file: ", configFile)
 	} else {
