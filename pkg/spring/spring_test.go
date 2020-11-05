@@ -292,9 +292,11 @@ func Test_logFsStatError(t *testing.T) {
 	}
 }
 
-func Test_loadConfig(t *testing.T) {
+func TestLoadProperties(t *testing.T) {
+	prevfs := fs
+	defer func() { fs = prevfs }()
 	fs = afero.NewMemMapFs()
-	configFile := "kubesvc.yaml"
+	configFile := "/kubesvc.yaml"
 	content := `
 kubernetes:
   accounts:
@@ -311,9 +313,12 @@ kubernetes:
 	}
 
 	// Test
-	config, err := loadConfig(configFile)
+	config, paths, err := loadProperties([]string{"kubesvc"}, "", []string{}, map[string]string{})
 
 	const expectedMessage = "unable to parse config file"
+	if !assert.Len(t, paths, 0) {
+		return
+	}
 	if !assert.Len(t, config, 0) {
 		return
 	}
