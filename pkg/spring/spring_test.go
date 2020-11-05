@@ -237,3 +237,36 @@ func Test_logFsStatError(t *testing.T) {
 		return
 	}
 }
+
+func Test_loadConfig(t *testing.T) {
+	fs = afero.NewMemMapFs()
+	configFile := "kubesvc.yaml"
+	content := `
+kubernetes:
+  accounts:
+    -name: gke_github-replication-sandbox_us-central1-c_kubesvc-testing1-dev
+      kubeconfigFile: /kubeconfigfiles/kubeconfig
+`
+	var err error
+	var file afero.File
+	if file, err = fs.Create(configFile); !assert.NoError(t, err) {
+		return
+	}
+	if _, err := file.WriteString(content); !assert.NoError(t, err) {
+		return
+	}
+
+	// Test
+	config, err := loadConfig(configFile)
+
+	const expectedMessage = "unable to parse config file"
+	if !assert.Len(t, config, 0) {
+		return
+	}
+	if !assert.Error(t, err, "with message %q", expectedMessage) {
+		return
+	}
+	if !assert.Contains(t, err.Error(), expectedMessage) {
+		return
+	}
+}
