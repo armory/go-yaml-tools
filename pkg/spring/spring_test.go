@@ -172,6 +172,9 @@ func TestWatchParseError(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.TODO())
 	c, err := loadDefaultDynamicWithEnv(env, ctx, propNames, func(cfg map[string]interface{}, err error) {
+		if ctx.Err() != nil {
+			return
+		}
 		assert.Contains(t, buf.String(), "file "+file3+" had error ")
 		cancel()
 	})
@@ -215,6 +218,9 @@ func TestWatchSymLink(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	env := springEnv{configDir: dir}
 	c, err := loadDefaultDynamicWithEnv(env, ctx, []string{"gate"}, func(cfg map[string]interface{}, err error) {
+		if ctx.Err() != nil {
+			return
+		}
 		assert.Equal(t, "bat", cfg["foo"])
 		cancel()
 	})
