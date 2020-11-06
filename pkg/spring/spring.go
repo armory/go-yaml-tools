@@ -65,23 +65,22 @@ func (s *springEnv) profiles() []string {
 // OS's file system. This will allow us to test our package.
 var fs = afero.NewOsFs()
 
-func loadConfig(configFile string) map[interface{}]interface{} {
+func loadConfig(configFile string) (map[interface{}]interface{}, error) {
 	s := map[interface{}]interface{}{}
 	if _, err := fs.Stat(configFile); err == nil {
 		bytes, err := afero.ReadFile(fs, configFile)
 		if err != nil {
 			log.Errorf("Unable to open config file %s: %v", configFile, err)
-			return nil
+			return nil, nil
 		}
 		if err = yamlParse.Unmarshal(bytes, &s); err != nil {
-			log.Errorf("Unable to parse config file %s: %v", configFile, err)
-			return s
+			return s, fmt.Errorf("unable to parse config file %s: %w", configFile, err)
 		}
 		log.Info("Configured with settings from file: ", configFile)
 	} else {
 		logFsStatError(err, "Config file ", configFile, " not present; falling back to default settings")
 	}
-	return s
+	return s, nil
 }
 
 func logFsStatError(err error, args ...interface{}) {
@@ -157,7 +156,11 @@ func watchConfigFiles(ctx context.Context, files []string, envMap map[string]str
 					log.Debugf("file %s modified, rebuilding config", event.Name)
 					var cfgs []map[interface{}]interface{}
 					for _, f := range files {
-						cfgs = append(cfgs, loadConfig(f))
+						config, err := loadConfig(f)
+						if err != nil {
+							log.Errorf("file %s had error %s", f, err.Error())
+						}
+						cfgs = append(cfgs, config)
 					}
 					m, err := yaml.Resolve(cfgs, envMap)
 					updateFn(m, err)
@@ -222,8 +225,11 @@ func loadProperties(propNames []string, confDir string, profiles []string, envMa
 	//first load the main props, i.e. gate.yml/yaml with no profile extensions
 	for _, prop := range propNames {
 		// yaml is "official"
-		config, filePath := loadPropertyFromFile(fmt.Sprintf("%s/%s", confDir, prop))
-		// If the config is not nil, the file existed (might have been unparseable)
+		config, filePath, err := loadPropertyFromFile(fmt.Sprintf("%s/%s", confDir, prop))
+		// file might have been unparsable
+		if err != nil {
+			return nil, filePaths, err
+		}
 		if len(config) > 0 {
 			propMaps = append(propMaps, config)
 			filePaths = append(filePaths, filePath)
@@ -236,7 +242,10 @@ func loadProperties(propNames []string, confDir string, profiles []string, envMa
 		for i := range profiles {
 			p := profiles[i]
 			pTrim := strings.TrimSpace(p)
-			config, filePath := loadPropertyFromFile(fmt.Sprintf("%s/%s-%s", confDir, prop, pTrim))
+			config, filePath, err := loadPropertyFromFile(fmt.Sprintf("%s/%s-%s", confDir, prop, pTrim))
+			if err != nil {
+				return nil, filePaths, err
+			}
 			if len(config) > 0 {
 				propMaps = append(propMaps, config)
 				filePaths = append(filePaths, filePath)
@@ -247,16 +256,20 @@ func loadProperties(propNames []string, confDir string, profiles []string, envMa
 	return m, filePaths, err
 }
 
-func loadPropertyFromFile(pathPrefix string) (map[interface{}]interface{}, string) {
+func loadPropertyFromFile(pathPrefix string) (map[interface{}]interface{}, string, error) {
 	filePath := fmt.Sprintf("%s.yaml", pathPrefix)
-	config := loadConfig(filePath)
+	config, err := loadConfig(filePath)
+	if err != nil {
+		return config, filePath, err
+	}
+	if len(config) > 0 {
+		return config, filePath, nil
+	}
 
 	// but people also use "yml" too, if we don't get anything let's try this
-	if len(config) == 0 {
-		filePath = fmt.Sprintf("%s.yml", pathPrefix)
-		config = loadConfig(filePath)
-	}
-	return config, filePath
+	filePath = fmt.Sprintf("%s.yml", pathPrefix)
+	config, err = loadConfig(filePath)
+	return config, filePath, err
 }
 
 // Bool is a helper routine that allocates a new bool value

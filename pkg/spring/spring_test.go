@@ -122,12 +122,14 @@ func TestWatch(t *testing.T) {
 	assert.Nil(t, ioutil.WriteFile(file1, []byte("foo: bar"), 0644))
 	assert.Nil(t, ioutil.WriteFile(file2, []byte("foo: baz"), 0644))
 
-	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.TODO())
 	env := springEnv{configDir: dir}
 	c, err := loadDefaultDynamicWithEnv(env, ctx, []string{"gate"}, func(cfg map[string]interface{}, err error) {
+		if ctx.Err() != nil {
+			return
+		}
 		assert.Equal(t, "bat", cfg["foo"])
-		done <- struct{}{}
+		cancel()
 	})
 
 	assert.Nil(t, err)
@@ -141,9 +143,60 @@ func TestWatch(t *testing.T) {
 		select {
 		case <-time.After(1 * time.Second):
 			fmt.Println("time out reached")
-			close(done)
-		case <-done:
 			cancel()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func TestWatchParseError(t *testing.T) {
+	// We don't use the in-memory file system because we rely on watch
+	dir, err := ioutil.TempDir("", "spring-test")
+	if !assert.Nil(t, err) {
+		return
+	}
+
+	defer os.RemoveAll(dir)
+
+	env := springEnv{configDir: dir}
+	propNames := []string{"kubesvc"}
+	file3 := dir + "/kubesvc.yml"
+
+	assert.Nil(t, ioutil.WriteFile(file3, []byte("foo: baz"), 0644))
+
+	previousOut := logrus.StandardLogger().Out
+	defer logrus.SetOutput(previousOut)
+	var buf bytes.Buffer
+	logrus.SetOutput(io.MultiWriter(os.Stderr, &buf))
+
+	ctx, cancel := context.WithCancel(context.TODO())
+	c, err := loadDefaultDynamicWithEnv(env, ctx, propNames, func(cfg map[string]interface{}, err error) {
+		if ctx.Err() != nil {
+			return
+		}
+		assert.Contains(t, buf.String(), "file "+file3+" had error ")
+		cancel()
+	})
+
+	assert.Nil(t, err)
+	assert.Equal(t, "baz", c["foo"])
+
+	// Wait a bit to be sure the watcher is watching
+	time.Sleep(500 * time.Millisecond)
+	ioutil.WriteFile(file3, []byte(`
+kubernetes:
+  accounts:
+    -name: gke_github-replication-sandbox_us-central1-c_kubesvc-testing1-dev
+      kubeconfigFile: /kubeconfigfiles/kubeconfig
+`), 0644)
+
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+			fmt.Println("time out reached")
+			cancel()
+		case <-ctx.Done():
 			return
 		}
 	}
@@ -162,12 +215,14 @@ func TestWatchSymLink(t *testing.T) {
 	assert.Nil(t, ioutil.WriteFile(file, []byte("foo: bar"), 0644))
 	os.Symlink(file, newFile)
 
-	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.TODO())
 	env := springEnv{configDir: dir}
 	c, err := loadDefaultDynamicWithEnv(env, ctx, []string{"gate"}, func(cfg map[string]interface{}, err error) {
+		if ctx.Err() != nil {
+			return
+		}
 		assert.Equal(t, "bat", cfg["foo"])
-		done <- struct{}{}
+		cancel()
 	})
 
 	assert.Nil(t, err)
@@ -180,9 +235,8 @@ func TestWatchSymLink(t *testing.T) {
 	for {
 		select {
 		case <-time.After(1 * time.Second):
-			close(done)
-		case <-done:
 			cancel()
+		case <-ctx.Done():
 			return
 		}
 	}
@@ -234,6 +288,44 @@ func Test_logFsStatError(t *testing.T) {
 	}
 	logFsStatError(err, "")
 	if !assert.Contains(t, buf.String(), "level=error") {
+		return
+	}
+}
+
+func TestLoadProperties(t *testing.T) {
+	prevfs := fs
+	defer func() { fs = prevfs }()
+	fs = afero.NewMemMapFs()
+	configFile := "/kubesvc.yaml"
+	content := `
+kubernetes:
+  accounts:
+    -name: gke_github-replication-sandbox_us-central1-c_kubesvc-testing1-dev
+      kubeconfigFile: /kubeconfigfiles/kubeconfig
+`
+	var err error
+	var file afero.File
+	if file, err = fs.Create(configFile); !assert.NoError(t, err) {
+		return
+	}
+	if _, err := file.WriteString(content); !assert.NoError(t, err) {
+		return
+	}
+
+	// Test
+	config, paths, err := loadProperties([]string{"kubesvc"}, "", []string{}, map[string]string{})
+
+	const expectedMessage = "unable to parse config file"
+	if !assert.Len(t, paths, 0) {
+		return
+	}
+	if !assert.Len(t, config, 0) {
+		return
+	}
+	if !assert.Error(t, err, "with message %q", expectedMessage) {
+		return
+	}
+	if !assert.Contains(t, err.Error(), expectedMessage) {
 		return
 	}
 }
