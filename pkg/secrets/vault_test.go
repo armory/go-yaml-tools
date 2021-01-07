@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"github.com/hashicorp/vault/api"
+	"github.com/hashicorp/vault/http"
 	"github.com/hashicorp/vault/sdk/helper/consts"
+	"github.com/hashicorp/vault/vault"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"net"
+	"os"
 	"testing"
 )
 
@@ -28,9 +32,6 @@ func (m *MockVaultClient) Write(path string, data map[string]interface{}) (*api.
 func (m *MockVaultClient) Read(path string) (*api.Secret, error) {
 	m.Called(path)
 	return &api.Secret{
-		Auth: &api.SecretAuth{
-			ClientToken: m.token,
-		},
 		Data:     m.readData,
 		Warnings: m.readWarnings,
 	}, nil
@@ -90,7 +91,8 @@ func TestUserPassAuth(t *testing.T) {
 			d := &VaultDecrypter{
 				vaultConfig: c.config,
 			}
-			token, err := d.fetchUserPassToken(c.client)
+			d.setTokenFetcher()
+			token, err := d.tokenFetcher.fetchToken(c.client)
 			assert.Equal(t, c.expectError, err != nil)
 			assert.Equal(t, c.client.token, token)
 
@@ -163,10 +165,12 @@ func TestKubernetesAuth(t *testing.T) {
 		t.Run(testName, func(t *testing.T) {
 			c.client.On("Write", c.expectedPath, c.expectedData).Return(c.client.writeResponse, c.client.writeErr)
 
-			d := &VaultDecrypter{
-				vaultConfig: c.config,
+			tokenFetcher := KubernetesServiceAccountTokenFetcher{
+				role:       c.config.Role,
+				path:       c.config.Path,
+				fileReader: mockFileReader,
 			}
-			token, err := d.fetchServiceAccountToken(c.client, mockFileReader)
+			token, err := tokenFetcher.fetchToken(c.client)
 			assert.Equal(t, c.expectError, err != nil)
 			assert.Equal(t, c.expectedToken, token)
 
@@ -176,21 +180,77 @@ func TestKubernetesAuth(t *testing.T) {
 	}
 }
 
+func mockEnvGetter(name string) string {
+	return "mock-env-token"
+}
+
+func mockEnvFailToGetter(name string) string {
+	return ""
+}
+
+func TestTokenAuth(t *testing.T) {
+	cases := map[string]struct {
+		expectedToken string
+		expectError   bool
+	}{
+		"happy path": {
+			expectedToken: "mock-env-token",
+			expectError:   false,
+		},
+		"env variable not set": {
+			expectedToken: "",
+			expectError:   true,
+		},
+	}
+	for testName, c := range cases {
+		t.Run(testName, func(t *testing.T) {
+			os.Setenv("VAULT_TOKEN", c.expectedToken)
+			tokenFetcher := EnvironmentVariableTokenFetcher{}
+			token, err := tokenFetcher.fetchToken(nil)
+			assert.Equal(t, c.expectError, err != nil)
+			assert.Equal(t, c.expectedToken, token)
+			os.Unsetenv("VAULT_TOKEN")
+
+		})
+	}
+}
+
 func TestValidateVaultConfig(t *testing.T) {
 	cases := map[string]struct {
 		config  VaultConfig
 		wantErr bool
 	}{
-		"if Token, we don't need to look in env var": {
+		"vault not enabled": {
+			config: VaultConfig{
+				Enabled:    false,
+				Url:        "vault.com",
+				AuthMethod: "KUBERNETES",
+				Role:       "role",
+				Path:       "path",
+			},
+			wantErr: true,
+		},
+		"missing URL": {
 			config: VaultConfig{
 				Enabled:    true,
-				Url:        "vault.com",
-				AuthMethod: "TOKEN",
-				Role:       "",
-				Path:       "",
-				Token:      "s.123123123",
+				AuthMethod: "KUBERNETES",
+				Role:       "role",
+				Path:       "path"},
+			wantErr: true,
+		},
+		"missing auth method": {
+			config: VaultConfig{
+				Enabled: true,
+				Url:     "vault.com",
 			},
-			wantErr: false,
+			wantErr: true,
+		},
+		"token auth missing env variable": {
+			config: VaultConfig{
+				Enabled:    true,
+				AuthMethod: "TOKEN",
+			},
+			wantErr: true,
 		},
 		"kubernetes auth happy path": {
 			config: VaultConfig{
@@ -274,6 +334,17 @@ func TestValidateVaultConfig(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		"if Token already set, we don't need to look in env var": {
+			config: VaultConfig{
+				Enabled:    true,
+				Url:        "vault.com",
+				AuthMethod: "TOKEN",
+				Role:       "",
+				Path:       "",
+				Token:      "s.123123123",
+			},
+			wantErr: false,
+		},
 	}
 
 	for testName, c := range cases {
@@ -281,6 +352,139 @@ func TestValidateVaultConfig(t *testing.T) {
 			if err := validateVaultConfig(c.config); (err != nil) != c.wantErr {
 				t.Errorf("validateVaultConfig() error = %v, wantErr %v", err, c.wantErr)
 			}
+		})
+	}
+}
+
+func TestSetTokenFetcher(t *testing.T) {
+	cases := map[string]struct {
+		config               VaultConfig
+		expectedTokenFetcher TokenFetcher
+		expectError          bool
+	}{
+		"token auth": {
+			config: VaultConfig{
+				Enabled:    true,
+				Url:        "vault.com",
+				AuthMethod: "TOKEN",
+			},
+			expectedTokenFetcher: EnvironmentVariableTokenFetcher{},
+			expectError:          false,
+		},
+		//"kubernetes auth": {
+		//	config: VaultConfig{
+		//		Enabled:    true,
+		//		Url:        "vault.com",
+		//		AuthMethod: "KUBERNETES",
+		//		Role:       "my-role",
+		//		Path:       "my-path",
+		//	},
+		//	expectedTokenFetcher: KubernetesServiceAccountTokenFetcher{
+		//		role: "my-role",
+		//		path: "my-path",
+		//		fileReader: ioutil.ReadFile,
+		//		//tokenFile:
+		//	},
+		//	expectError: false,
+		//},
+		"userpass auth": {
+			config: VaultConfig{
+				Enabled:      true,
+				Url:          "vault.com",
+				AuthMethod:   "USERPASS",
+				Username:     "my-user",
+				Password:     "my-password",
+				UserAuthPath: "my-path",
+			},
+			expectedTokenFetcher: UserPassTokenFetcher{
+				username:     "my-user",
+				password:     "my-password",
+				userAuthPath: "my-path",
+			},
+			expectError: false,
+		},
+		"unknown auth": {
+			config: VaultConfig{
+				Enabled:    true,
+				Url:        "vault.com",
+				AuthMethod: "UNKNOWN",
+			},
+			expectError: true,
+		},
+	}
+	for testName, c := range cases {
+		t.Run(testName, func(t *testing.T) {
+
+			decrypter := &VaultDecrypter{
+				vaultConfig: c.config,
+			}
+			err := decrypter.setTokenFetcher()
+
+			assert.EqualValues(t, c.expectedTokenFetcher, decrypter.tokenFetcher)
+			assert.True(t, c.expectError == (err != nil))
+		})
+	}
+}
+
+func TestKubernetesTokenFetcher(t *testing.T) {
+	decrypter := &VaultDecrypter{
+		vaultConfig: VaultConfig{
+			Enabled:    true,
+			Url:        "vault.com",
+			AuthMethod: "KUBERNETES",
+			Role:       "my-role",
+			Path:       "my-path",
+		},
+	}
+	err := decrypter.setTokenFetcher()
+	assert.Nil(t, err)
+
+	actualTokenFetcher, ok := decrypter.tokenFetcher.(KubernetesServiceAccountTokenFetcher)
+	assert.True(t, ok)
+	assert.Equal(t, "my-role", actualTokenFetcher.role)
+	assert.Equal(t, "my-path", actualTokenFetcher.path)
+}
+
+func TestSetToken(t *testing.T) {
+	cases := map[string]struct {
+		config        VaultConfig
+		expectedToken string
+		expectError   bool
+	}{
+		"happy path": {
+			config: VaultConfig{
+				Enabled:    true,
+				Url:        "vault.com",
+				AuthMethod: "TOKEN",
+			},
+			expectedToken: "mock-token",
+			expectError:   false,
+		},
+		"error fetching token": {
+			config: VaultConfig{
+				Enabled:    true,
+				Url:        "vault.com",
+				AuthMethod: "TOKEN",
+			},
+			expectedToken: "",
+			expectError:   true,
+		},
+	}
+	for testName, c := range cases {
+		t.Run(testName, func(t *testing.T) {
+			os.Setenv("VAULT_TOKEN", c.expectedToken)
+			decrypter := &VaultDecrypter{
+				vaultConfig: c.config,
+			}
+			err := decrypter.setTokenFetcher()
+			assert.Nil(t, err)
+
+			assert.Equal(t, "", decrypter.vaultConfig.Token)
+
+			err = decrypter.setToken()
+			assert.Equal(t, c.expectError, err != nil)
+			assert.Equal(t, c.expectedToken, decrypter.vaultConfig.Token)
+			os.Unsetenv("VAULT_TOKEN")
 		})
 	}
 }
@@ -424,9 +628,86 @@ func TestParseVaultSecret(t *testing.T) {
 	for testName, c := range cases {
 		t.Run(testName, func(t *testing.T) {
 			v := &VaultDecrypter{}
-			err := v.parse(c.params)
+			err := v.parseSyntax(c.params)
 			assert.Equal(t, c.shouldError, err != nil)
 			assert.EqualValues(t, c.expectedDecrypter, v)
 		})
 	}
+}
+
+func TestFetchSecret(t *testing.T) {
+	cases := map[string]struct {
+		decrypter       VaultDecrypter
+		config          VaultConfig
+		client          *MockVaultClient
+		encryptedSyntax string
+		expectedPath    string
+		expectedData    map[string]interface{}
+		expectError     bool
+	}{
+		"happy path": {
+			decrypter: VaultDecrypter{
+				vaultConfig: VaultConfig{
+					Enabled:    true,
+					Url:        "vault.com",
+					AuthMethod: "TOKEN",
+				},
+				client: &MockVaultClient{
+					//token: "my-token",
+					readData: map[string]interface{}{},
+					//readWarnings: []string{},
+				},
+			},
+			expectedPath: "auth/path/login/user",
+			expectedData: map[string]interface{}{"password": "password"},
+			expectError:  false,
+		},
+	}
+	for testName, c := range cases {
+		t.Run(testName, func(t *testing.T) {
+			c.client.On("Write", c.expectedPath, c.expectedData).Return(c.client.writeResponse, c.client.writeErr)
+
+			d := &VaultDecrypter{
+				vaultConfig: c.config,
+			}
+			d.setTokenFetcher()
+			token, err := d.tokenFetcher.fetchToken(c.client)
+			assert.Equal(t, c.expectError, err != nil)
+			assert.Equal(t, c.client.token, token)
+
+			// assert Write() method called with expected arguments
+			c.client.AssertExpectations(t)
+		})
+	}
+}
+func createTestVault(t *testing.T) (net.Listener, *api.Client) {
+	t.Helper()
+
+	// Create an in-memory, unsealed core (the "backend", if you will).
+	core, keyShares, rootToken := vault.TestCoreUnsealed(t)
+	_ = keyShares
+
+	// Start an HTTP server for the core.
+	ln, addr := http.TestServer(t, core)
+
+	// Create a client that talks to the server, initially authenticating with
+	// the root token.
+	conf := api.DefaultConfig()
+	conf.Address = addr
+
+	client, err := api.NewClient(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.SetToken(rootToken)
+
+	// Setup required secrets, policies, etc.
+	_, err = client.Logical().Write("secret/foo", map[string]interface{}{
+		"secret": "bar",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return ln, client
 }

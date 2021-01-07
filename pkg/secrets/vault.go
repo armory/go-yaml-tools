@@ -11,19 +11,7 @@ import (
 	"strings"
 )
 
-func RegisterVaultConfig(vaultConfig VaultConfig) error {
-	if err := validateVaultConfig(vaultConfig); err != nil {
-		return fmt.Errorf("vault configuration error - %s", err)
-	}
-	Engines["vault"] = func(ctx context.Context, isFile bool, params string) (Decrypter, error) {
-		vd := &VaultDecrypter{isFile: isFile, vaultConfig: vaultConfig}
-		if err := vd.parse(params); err != nil {
-			return nil, err
-		}
-		return vd, nil
-	}
-	return nil
-}
+//var KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
 type VaultConfig struct {
 	Enabled      bool   `json:"enabled" yaml:"enabled"`
@@ -35,7 +23,7 @@ type VaultConfig struct {
 	Password     string `json:"password" yaml:"password"`
 	UserAuthPath string `json:"userAuthPath" yaml:"userAuthPath"`
 	Namespace    string `json:"namespace" yaml:"namespace"`
-	Token        string
+	Token        string // no struct tags for token
 }
 
 type VaultSecret struct {
@@ -48,6 +36,8 @@ type VaultDecrypter struct {
 	base64Encoded string
 	isFile        bool
 	vaultConfig   VaultConfig
+	tokenFetcher  TokenFetcher
+	client        VaultClient
 }
 
 type VaultClient interface {
@@ -55,9 +45,124 @@ type VaultClient interface {
 	Read(path string) (*api.Secret, error)
 }
 
+func RegisterVaultConfig(vaultConfig VaultConfig) error {
+	if err := validateVaultConfig(vaultConfig); err != nil {
+		return fmt.Errorf("vault configuration error - %s", err)
+	}
+
+	Engines["vault"] = func(ctx context.Context, isFile bool, params string) (Decrypter, error) {
+		vd := &VaultDecrypter{isFile: isFile, vaultConfig: vaultConfig}
+		if err := vd.parseSyntax(params); err != nil {
+			return nil, err
+		}
+		if err := vd.setTokenFetcher(); err != nil {
+			return nil, err
+		}
+		//client, err := vd.getVaultClient()
+		if err := vd.setVaultClient(); err != nil {
+			return nil, err
+		}
+		return vd, nil
+	}
+	return nil
+}
+
+type TokenFetcher interface {
+	fetchToken(client VaultClient) (string, error)
+}
+
+type EnvironmentVariableTokenFetcher struct{}
+
+func (e EnvironmentVariableTokenFetcher) fetchToken(client VaultClient) (string, error) {
+	token := os.Getenv("VAULT_TOKEN")
+	if token == "" {
+		return "", fmt.Errorf("VAULT_TOKEN environment variable not set")
+	}
+	return token, nil
+}
+
+type UserPassTokenFetcher struct {
+	username     string
+	password     string
+	userAuthPath string
+}
+
+func (u UserPassTokenFetcher) fetchToken(client VaultClient) (string, error) {
+	data := map[string]interface{}{
+		"password": u.password,
+	}
+	loginPath := "auth/" + u.userAuthPath + "/login/" + u.username
+
+	log.Infof("logging into vault with USERPASS auth at: %s", loginPath)
+	secret, err := client.Write(loginPath, data)
+	if err != nil {
+		return "", fmt.Errorf("error logging into vault using user/password auth: %s", err)
+	}
+
+	return secret.Auth.ClientToken, nil
+}
+
+type KubernetesServiceAccountTokenFetcher struct {
+	role string
+	path string
+	//tokenFile string
+	fileReader fileReader
+}
+
+// define a file reader function so we can test kubernetes auth
+type fileReader func(string) ([]byte, error)
+
+func (k KubernetesServiceAccountTokenFetcher) fetchToken(client VaultClient) (string, error) {
+	tokenBytes, err := k.fileReader("/var/run/secrets/kubernetes.io/serviceaccount/token")
+	//tokenBytes, err := ioutil.ReadFile(KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE)
+	if err != nil {
+		return "", fmt.Errorf("error reading service account token: %s", err)
+	}
+	data := map[string]interface{}{
+		"role": k.role,
+		"jwt":  string(tokenBytes),
+	}
+	loginPath := "auth/" + k.path + "/login"
+
+	log.Infof("logging into vault with KUBERNETES auth at: %s", loginPath)
+	secret, err := client.Write(loginPath, data)
+	if err != nil {
+		return "", fmt.Errorf("error logging into vault using kubernetes auth: %s", err)
+	}
+
+	return secret.Auth.ClientToken, nil
+}
+
+func (decrypter *VaultDecrypter) setTokenFetcher() error {
+	var tokenFetcher TokenFetcher
+
+	switch decrypter.vaultConfig.AuthMethod {
+	case "TOKEN":
+		tokenFetcher = EnvironmentVariableTokenFetcher{}
+	case "KUBERNETES":
+		tokenFetcher = KubernetesServiceAccountTokenFetcher{
+			role: decrypter.vaultConfig.Role,
+			path: decrypter.vaultConfig.Path,
+			//tokenFile: "/var/run/secrets/kubernetes.io/serviceaccount/token",
+			fileReader: ioutil.ReadFile,
+		}
+	case "USERPASS":
+		tokenFetcher = UserPassTokenFetcher{
+			username:     decrypter.vaultConfig.Username,
+			password:     decrypter.vaultConfig.Password,
+			userAuthPath: decrypter.vaultConfig.UserAuthPath,
+		}
+	default:
+		return fmt.Errorf("unknown Vault secrets auth method: %q", decrypter.vaultConfig.AuthMethod)
+	}
+
+	decrypter.tokenFetcher = tokenFetcher
+	return nil
+}
+
 func (decrypter *VaultDecrypter) Decrypt() (string, error) {
 	if decrypter.vaultConfig.Token == "" {
-		err := decrypter.fetchToken()
+		err := decrypter.setToken()
 		if err != nil {
 			return "", err
 		}
@@ -65,23 +170,26 @@ func (decrypter *VaultDecrypter) Decrypt() (string, error) {
 	secret, err := decrypter.fetchSecret()
 	if err != nil && strings.Contains(err.Error(), "403") {
 		// get new token and retry in case our saved token is no longer valid
-		err := decrypter.fetchToken()
+		err := decrypter.setToken()
 		if err != nil {
 			return "", err
 		}
 		secret, err = decrypter.fetchSecret()
 	}
-	if err != nil || !decrypter.isFile {
-		return secret, err
+	if err != nil {
+		return "", err
 	}
-	return ToTempFile([]byte(secret))
+	if decrypter.IsFile() {
+		return ToTempFile([]byte(secret))
+	}
+	return secret, nil
 }
 
 func (v *VaultDecrypter) IsFile() bool {
 	return v.isFile
 }
 
-func (v *VaultDecrypter) parse(params string) error {
+func (v *VaultDecrypter) parseSyntax(params string) error {
 	tokens := strings.Split(params, "!")
 	for _, element := range tokens {
 		kv := strings.Split(element, ":")
@@ -103,7 +211,7 @@ func (v *VaultDecrypter) parse(params string) error {
 		return fmt.Errorf("secret format error - 'e' for engine is required")
 	}
 	if v.path == "" {
-		return fmt.Errorf("secret format error - 'p' for path is required (replaces deprecated 'n' param)")
+		return fmt.Errorf("secret format error - 'p' for userAuthPath is required (replaces deprecated 'n' param)")
 	}
 	if v.key == "" {
 		return fmt.Errorf("secret format error - 'k' for key is required")
@@ -135,7 +243,7 @@ func validateVaultConfig(vaultConfig VaultConfig) error {
 		}
 	case "KUBERNETES":
 		if vaultConfig.Path == "" || vaultConfig.Role == "" {
-			return fmt.Errorf("path and role both required for Kubernetes auth method")
+			return fmt.Errorf("userAuthPath and role both required for Kubernetes auth method")
 		}
 	case "USERPASS":
 		if vaultConfig.Username == "" || vaultConfig.Password == "" || vaultConfig.UserAuthPath == "" {
@@ -148,32 +256,13 @@ func validateVaultConfig(vaultConfig VaultConfig) error {
 	return nil
 }
 
-func (decrypter *VaultDecrypter) fetchToken() error {
-	var token string
-	var err error
+func (decrypter *VaultDecrypter) setToken() error {
+	//client, err := decrypter.getVaultClient()
+	//if err != nil {
+	//	return err
+	//}
 
-	switch decrypter.vaultConfig.AuthMethod {
-	case "TOKEN":
-		token = os.Getenv("VAULT_TOKEN")
-		if token == "" {
-			return fmt.Errorf("VAULT_TOKEN environment variable not set")
-		}
-	case "KUBERNETES":
-		client, err := decrypter.getVaultClient()
-		if err != nil {
-			return err
-		}
-		token, err = decrypter.fetchServiceAccountToken(client, ioutil.ReadFile)
-	case "USERPASS":
-		client, err := decrypter.getVaultClient()
-		if err != nil {
-			return err
-		}
-		token, err = decrypter.fetchUserPassToken(client)
-	default:
-		return fmt.Errorf("unknown Vault secrets auth method: %q", decrypter.vaultConfig.AuthMethod)
-	}
-
+	token, err := decrypter.tokenFetcher.fetchToken(decrypter.client)
 	if err != nil {
 		return fmt.Errorf("error fetching vault token - %s", err)
 	}
@@ -181,12 +270,20 @@ func (decrypter *VaultDecrypter) fetchToken() error {
 	return nil
 }
 
-func (decrypter *VaultDecrypter) getVaultClient() (VaultClient, error) {
+//func (decrypter *VaultDecrypter) getVaultClient() (VaultClient, error) {
+//	client, err := decrypter.newAPIClient()
+//	if err != nil {
+//		return nil, err
+//	}
+//	return client.Logical(), nil
+//}
+func (decrypter *VaultDecrypter) setVaultClient() error {
 	client, err := decrypter.newAPIClient()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return client.Logical(), nil
+	decrypter.client = client.Logical()
+	return nil
 }
 
 func (decrypter *VaultDecrypter) newAPIClient() (*api.Client, error) {
@@ -205,55 +302,15 @@ func (decrypter *VaultDecrypter) newAPIClient() (*api.Client, error) {
 	return client, nil
 }
 
-// define a file reader function so we can test kubernetes auth
-type fileReader func(string) ([]byte, error)
-
-func (decrypter *VaultDecrypter) fetchServiceAccountToken(client VaultClient, fileReader fileReader) (string, error) {
-	tokenBytes, err := fileReader("/var/run/secrets/kubernetes.io/serviceaccount/token")
-	if err != nil {
-		return "", fmt.Errorf("error reading service account token: %s", err)
-	}
-	token := string(tokenBytes)
-
-	data := map[string]interface{}{
-		"role": decrypter.vaultConfig.Role,
-		"jwt":  token,
-	}
-	loginPath := "auth/" + decrypter.vaultConfig.Path + "/login"
-	log.Infof("logging into vault with KUBERNETES auth at: %s", loginPath)
-	secret, err := client.Write(loginPath, data)
-	if err != nil {
-		return "", fmt.Errorf("error logging into vault using kubernetes auth: %s", err)
-	}
-
-	return secret.Auth.ClientToken, nil
-}
-
-func (decrypter *VaultDecrypter) fetchUserPassToken(client VaultClient) (string, error) {
-
-	data := map[string]interface{}{
-		"password": decrypter.vaultConfig.Password,
-	}
-
-	loginPath := "auth/" + decrypter.vaultConfig.UserAuthPath + "/login/" + decrypter.vaultConfig.Username
-	log.Infof("logging into vault with USERPASS auth at: %s", loginPath)
-	secret, err := client.Write(loginPath, data)
-	if err != nil {
-		return "", fmt.Errorf("error logging into vault using user/password auth: %s", err)
-	}
-
-	return secret.Auth.ClientToken, nil
-}
-
 func (decrypter *VaultDecrypter) fetchSecret() (string, error) {
-	client, err := decrypter.getVaultClient()
-	if err != nil {
-		return "", fmt.Errorf("error fetching vault client - %s", err)
-	}
+	//client, err := decrypter.getVaultClient()
+	//if err != nil {
+	//	return "", fmt.Errorf("error fetching vault client - %s", err)
+	//}
 
 	path := decrypter.engine + "/" + decrypter.path
-	log.Debugf("attempting to read secret at KV v1 path: %s", path)
-	secretMapping, err := client.Read(path)
+	log.Debugf("attempting to read secret at KV v1 userAuthPath: %s", path)
+	secretMapping, err := decrypter.client.Read(path)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid character '<' looking for beginning of value") {
 			// some connection errors aren't properly caught, and the vault client tries to parse <nil>
@@ -266,15 +323,15 @@ func (decrypter *VaultDecrypter) fetchSecret() (string, error) {
 	warnings := secretMapping.Warnings
 	if warnings != nil {
 		for i := range warnings {
-			if strings.Contains(warnings[i], "Invalid path for a versioned K/V secrets engine") {
-				// try again using K/V v2 path
+			if strings.Contains(warnings[i], "Invalid userAuthPath for a versioned K/V secrets engine") {
+				// try again using K/V v2 userAuthPath
 				path = decrypter.engine + "/data/" + decrypter.path
-				log.Debugf("attempting to read secret at KV v2 path: %s", path)
-				secretMapping, err = client.Read(path)
+				log.Debugf("attempting to read secret at KV v2 userAuthPath: %s", path)
+				secretMapping, err = decrypter.client.Read(path)
 				if err != nil {
 					return "", fmt.Errorf("error fetching secret from vault: %s", err)
 				} else if secretMapping == nil {
-					return "", fmt.Errorf("couldn't find vault path %s under engine %s", decrypter.path, decrypter.engine)
+					return "", fmt.Errorf("couldn't find vault userAuthPath %s under engine %s", decrypter.path, decrypter.engine)
 				}
 				break
 			}
@@ -291,7 +348,7 @@ func (decrypter *VaultDecrypter) fetchSecret() (string, error) {
 
 		decrypted, ok := mapping[decrypter.key].(string)
 		if !ok {
-			return "", fmt.Errorf("error fetching secret at engine: %s, path: %s and key %s", decrypter.engine, decrypter.path, decrypter.key)
+			return "", fmt.Errorf("error fetching secret at engine: %s, userAuthPath: %s and key %s", decrypter.engine, decrypter.path, decrypter.key)
 		}
 		log.Debugf("successfully fetched secret")
 		return decrypted, nil
