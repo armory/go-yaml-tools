@@ -3,15 +3,14 @@ package secrets
 import (
 	"context"
 	"errors"
-	"github.com/hashicorp/vault/api"
-	"github.com/hashicorp/vault/http"
-	"github.com/hashicorp/vault/sdk/helper/consts"
-	"github.com/hashicorp/vault/vault"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"net"
+	"fmt"
 	"os"
 	"testing"
+
+	"github.com/hashicorp/vault/api"
+	"github.com/hashicorp/vault/sdk/helper/consts"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 type MockVaultClient struct {
@@ -35,6 +34,104 @@ func (m *MockVaultClient) Read(path string) (*api.Secret, error) {
 		Data:     m.readData,
 		Warnings: m.readWarnings,
 	}, nil
+}
+
+type versionedResponse struct {
+	expectedPath string
+	response     *api.Secret
+	err          error
+}
+type fakeVaultClient struct {
+	t          *testing.T
+	v1response versionedResponse
+	v2response versionedResponse
+}
+
+func (f *fakeVaultClient) Write(path string, data map[string]interface{}) (*api.Secret, error) {
+	panic("implement me")
+}
+
+func (f *fakeVaultClient) Read(path string) (*api.Secret, error) {
+	switch {
+	case path == f.v1response.expectedPath:
+		return f.v1response.response, f.v1response.err
+	case path == f.v2response.expectedPath:
+		return f.v2response.response, f.v2response.err
+	default:
+		f.t.Fatalf("invalid path called: %s", path)
+		return nil, nil
+	}
+}
+
+func TestVaultDecrypter_fetchSecret(t *testing.T) {
+	engine := "t1"
+	path := "t2"
+	cases := map[string]struct {
+		vc             *fakeVaultClient
+		expectedSecret string
+		expectedError  string
+	}{
+		"calling v1 path returns a secret": {
+			expectedSecret: "testvalue",
+			vc: &fakeVaultClient{
+				v1response: versionedResponse{
+					expectedPath: engine + "/" + path,
+					response: &api.Secret{
+						Data: map[string]interface{}{
+							"key": "testvalue",
+						},
+					},
+					err: nil,
+				},
+			},
+		},
+		"callling v2 path returns a secret": {
+			expectedSecret: "testvalue",
+			vc: &fakeVaultClient{
+				v1response: versionedResponse{
+					expectedPath: engine + "/" + path,
+					response:     &api.Secret{Warnings: []string{"Invalid path for a versioned K/V secrets engine"}},
+					err:          nil,
+				},
+				v2response: versionedResponse{
+					expectedPath: engine + "/data/" + path,
+					response: &api.Secret{
+						Data: map[string]interface{}{
+							"data": map[string]interface{}{
+								"key": "testvalue",
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+		},
+		"v1 returns connection error": {
+			expectedError: "check connection to the server",
+			vc: &fakeVaultClient{
+				v1response: versionedResponse{
+					expectedPath: engine + "/" + path,
+					response:     nil,
+					err:          fmt.Errorf("invalid character '<' looking for beginning of value"),
+				},
+			},
+		},
+	}
+	for testName, c := range cases {
+		t.Run(testName, func(t *testing.T) {
+			c.vc.t = t
+			d := &VaultDecrypter{client: c.vc, path: path, engine: engine, key: "key"}
+			s, err := d.fetchSecret()
+			if err != nil {
+				if c.expectedError != "" {
+					assert.Contains(t, err.Error(), c.expectedError)
+				} else {
+					t.Fatal(err)
+				}
+			}
+			assert.Equal(t, c.expectedSecret, s)
+		})
+	}
 }
 
 func TestUserPassAuth(t *testing.T) {
@@ -680,34 +777,35 @@ func TestFetchSecret(t *testing.T) {
 		})
 	}
 }
-func createTestVault(t *testing.T) (net.Listener, *api.Client) {
-	t.Helper()
 
-	// Create an in-memory, unsealed core (the "backend", if you will).
-	core, keyShares, rootToken := vault.TestCoreUnsealed(t)
-	_ = keyShares
-
-	// Start an HTTP server for the core.
-	ln, addr := http.TestServer(t, core)
-
-	// Create a client that talks to the server, initially authenticating with
-	// the root token.
-	conf := api.DefaultConfig()
-	conf.Address = addr
-
-	client, err := api.NewClient(conf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client.SetToken(rootToken)
-
-	// Setup required secrets, policies, etc.
-	_, err = client.Logical().Write("secret/foo", map[string]interface{}{
-		"secret": "bar",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return ln, client
-}
+// func createTestVault(t *testing.T) (net.Listener, *api.Client) {
+// 	t.Helper()
+//
+// 	// Create an in-memory, unsealed core (the "backend", if you will).
+// 	core, keyShares, rootToken := vault.TestCoreUnsealed(t)
+// 	_ = keyShares
+//
+// 	// Start an HTTP server for the core.
+// 	ln, addr := http.TestServer(t, core)
+//
+// 	// Create a client that talks to the server, initially authenticating with
+// 	// the root token.
+// 	conf := api.DefaultConfig()
+// 	conf.Address = addr
+//
+// 	client, err := api.NewClient(conf)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	client.SetToken(rootToken)
+//
+// 	// Setup required secrets, policies, etc.
+// 	_, err = client.Logical().Write("secret/foo", map[string]interface{}{
+// 		"secret": "bar",
+// 	})
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+//
+// 	return ln, client
+// }

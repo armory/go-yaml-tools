@@ -3,12 +3,13 @@ package secrets
 import (
 	"context"
 	"fmt"
-	"github.com/hashicorp/vault/api"
-	"github.com/mitchellh/mapstructure"
-	log "github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os"
 	"strings"
+
+	"github.com/hashicorp/vault/api"
+	"github.com/mitchellh/mapstructure"
+	log "github.com/sirupsen/logrus"
 )
 
 //var KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/token"
@@ -323,15 +324,15 @@ func (decrypter *VaultDecrypter) fetchSecret() (string, error) {
 	warnings := secretMapping.Warnings
 	if warnings != nil {
 		for i := range warnings {
-			if strings.Contains(warnings[i], "Invalid userAuthPath for a versioned K/V secrets engine") {
+			if strings.Contains(warnings[i], "Invalid path for a versioned K/V secrets engine") {
 				// try again using K/V v2 userAuthPath
 				path = decrypter.engine + "/data/" + decrypter.path
-				log.Debugf("attempting to read secret at KV v2 userAuthPath: %s", path)
+				log.Debugf("attempting to read secret at KV v2 path: %s", path)
 				secretMapping, err = decrypter.client.Read(path)
 				if err != nil {
 					return "", fmt.Errorf("error fetching secret from vault: %s", err)
 				} else if secretMapping == nil {
-					return "", fmt.Errorf("couldn't find vault userAuthPath %s under engine %s", decrypter.path, decrypter.engine)
+					return "", fmt.Errorf("couldn't find vault path %s under engine %s", decrypter.path, decrypter.engine)
 				}
 				break
 			}
@@ -348,7 +349,7 @@ func (decrypter *VaultDecrypter) fetchSecret() (string, error) {
 
 		decrypted, ok := mapping[decrypter.key].(string)
 		if !ok {
-			return "", fmt.Errorf("error fetching secret at engine: %s, userAuthPath: %s and key %s", decrypter.engine, decrypter.path, decrypter.key)
+			return "", fmt.Errorf("error fetching secret at engine: %s, path: %s and key %s", decrypter.engine, decrypter.path, decrypter.key)
 		}
 		log.Debugf("successfully fetched secret")
 		return decrypted, nil
