@@ -12,8 +12,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-//var KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-
 type VaultConfig struct {
 	Enabled      bool   `json:"enabled" yaml:"enabled"`
 	Url          string `json:"url" yaml:"url"`
@@ -115,7 +113,6 @@ type fileReader func(string) ([]byte, error)
 
 func (k KubernetesServiceAccountTokenFetcher) fetchToken(client VaultClient) (string, error) {
 	tokenBytes, err := k.fileReader("/var/run/secrets/kubernetes.io/serviceaccount/token")
-	//tokenBytes, err := ioutil.ReadFile(KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE)
 	if err != nil {
 		return "", fmt.Errorf("error reading service account token: %s", err)
 	}
@@ -144,7 +141,6 @@ func (decrypter *VaultDecrypter) setTokenFetcher() error {
 		tokenFetcher = KubernetesServiceAccountTokenFetcher{
 			role: decrypter.vaultConfig.Role,
 			path: decrypter.vaultConfig.Path,
-			//tokenFile: "/var/run/secrets/kubernetes.io/serviceaccount/token",
 			fileReader: ioutil.ReadFile,
 		}
 	case "USERPASS":
@@ -258,11 +254,6 @@ func validateVaultConfig(vaultConfig VaultConfig) error {
 }
 
 func (decrypter *VaultDecrypter) setToken() error {
-	//client, err := decrypter.getVaultClient()
-	//if err != nil {
-	//	return err
-	//}
-
 	token, err := decrypter.tokenFetcher.fetchToken(decrypter.client)
 	if err != nil {
 		return fmt.Errorf("error fetching vault token - %s", err)
@@ -271,13 +262,6 @@ func (decrypter *VaultDecrypter) setToken() error {
 	return nil
 }
 
-//func (decrypter *VaultDecrypter) getVaultClient() (VaultClient, error) {
-//	client, err := decrypter.newAPIClient()
-//	if err != nil {
-//		return nil, err
-//	}
-//	return client.Logical(), nil
-//}
 func (decrypter *VaultDecrypter) setVaultClient() error {
 	client, err := decrypter.newAPIClient()
 	if err != nil {
@@ -303,14 +287,10 @@ func (decrypter *VaultDecrypter) newAPIClient() (*api.Client, error) {
 	return client, nil
 }
 
-func (decrypter *VaultDecrypter) fetchSecret() (string, error) {
-	//client, err := decrypter.getVaultClient()
-	//if err != nil {
-	//	return "", fmt.Errorf("error fetching vault client - %s", err)
-	//}
 
+func (decrypter *VaultDecrypter) fetchSecret() (string, error) {
 	path := decrypter.engine + "/" + decrypter.path
-	log.Debugf("attempting to read secret at KV v1 userAuthPath: %s", path)
+	log.Debugf("attempting to read secret at KV v1 path: %s", path)
 	secretMapping, err := decrypter.client.Read(path)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid character '<' looking for beginning of value") {
@@ -321,41 +301,72 @@ func (decrypter *VaultDecrypter) fetchSecret() (string, error) {
 		return "", fmt.Errorf("error fetching secret from vault: %s", err)
 	}
 
-	warnings := secretMapping.Warnings
-	if warnings != nil {
-		for i := range warnings {
-			if strings.Contains(warnings[i], "Invalid path for a versioned K/V secrets engine") {
-				// try again using K/V v2 userAuthPath
-				path = decrypter.engine + "/data/" + decrypter.path
-				log.Debugf("attempting to read secret at KV v2 path: %s", path)
-				secretMapping, err = decrypter.client.Read(path)
-				if err != nil {
-					return "", fmt.Errorf("error fetching secret from vault: %s", err)
-				} else if secretMapping == nil {
-					return "", fmt.Errorf("couldn't find vault path %s under engine %s", decrypter.path, decrypter.engine)
-				}
-				break
-			}
+	if warnings := secretMapping.Warnings; containsRetryableWarning(warnings) {
+		// try again using K/V v2 path
+		path = decrypter.engine + "/data/" + decrypter.path
+		log.Debugf("attempting to read secret at KV v2 path: %s", path)
+		secretMapping, err = decrypter.client.Read(path)
+		if err != nil {
+			return "", fmt.Errorf("error fetching secret from vault: %s", err)
+		}
+		//if secretMapping == nil {
+		//	return "", fmt.Errorf("couldn't find vault path %s under engine %s", decrypter.path, decrypter.engine)
+		//}
+		//successfulVersion = "v2"
+	}
+
+	return decrypter.parseResults(secretMapping)
+
+	//if results == nil {
+	//	return "", fmt.Errorf("couldn't find vault path %s under engine %s", decrypter.path, decrypter.engine)
+	//}
+	//
+	//mapping := results.Data
+	//if data, ok := mapping["data"]; ok { // one more nesting of "data" if using K/V v2
+	//	if submap, ok := data.(map[string]interface{}); ok {
+	//		mapping = submap
+	//	}
+	//}
+	//
+	//decrypted, ok := mapping[decrypter.key].(string)
+	//if !ok {
+	//	return "", fmt.Errorf("error fetching secret at engine: %s, path: %s and key %s", decrypter.engine, decrypter.path, decrypter.key)
+	//}
+	//log.Debugf("successfully fetched secret")
+	//return decrypted, nil
+}
+
+func (decrypter *VaultDecrypter) parseResults(secretMapping *api.Secret) (string, error) {
+	if secretMapping == nil {
+		return "", fmt.Errorf("couldn't find vault path %s under engine %s", decrypter.path, decrypter.engine)
+	}
+
+	mapping := secretMapping.Data
+	if data, ok := mapping["data"]; ok { // one more nesting of "data" if using K/V v2
+		if submap, ok := data.(map[string]interface{}); ok {
+			mapping = submap
 		}
 	}
 
-	if secretMapping != nil {
-		mapping := secretMapping.Data
-		if data, ok := mapping["data"]; ok { // one more nesting of "data" if using K/V v2
-			if submap, ok := data.(map[string]interface{}); ok {
-				mapping = submap
-			}
-		}
-
-		decrypted, ok := mapping[decrypter.key].(string)
-		if !ok {
-			return "", fmt.Errorf("error fetching secret at engine: %s, path: %s and key %s", decrypter.engine, decrypter.path, decrypter.key)
-		}
-		log.Debugf("successfully fetched secret")
-		return decrypted, nil
+	decrypted, ok := mapping[decrypter.key].(string)
+	if !ok {
+		return "", fmt.Errorf("error fetching secret at engine: %s, path: %s and key %s", decrypter.engine, decrypter.path, decrypter.key)
 	}
+	log.Debugf("successfully fetched secret")
+	return decrypted, nil
+}
 
-	return "", nil
+func containsRetryableWarning(warnings []string) bool {
+	if warnings == nil {
+		return false
+	}
+	for _, w := range warnings {
+		switch {
+		case strings.Contains(w, "Invalid path for a versioned K/V secrets engine"):
+			return true
+		}
+	}
+	return false
 }
 
 func DecodeVaultConfig(vaultYaml map[interface{}]interface{}) (*VaultConfig, error) {
