@@ -63,160 +63,6 @@ func (f *fakeVaultClient) Read(path string) (*api.Secret, error) {
 	}
 }
 
-func TestVaultDecrypter_Decrypt(t *testing.T) {
-	engine := "t1"
-	path := "t2"
-	cases := map[string]struct {
-		vc             *fakeVaultClient
-		expectedSecret string
-		expectedError  string
-	}{
-		"calling v1 path returns a secret": {
-			expectedSecret: "testvalue",
-			vc: &fakeVaultClient{
-				v1response: versionedResponse{
-					expectedPath: engine + "/" + path,
-					response: &api.Secret{
-						Data: map[string]interface{}{
-							"key": "testvalue",
-						},
-					},
-					err: nil,
-				},
-			},
-		},
-		"calling v2 path returns a secret": {
-			expectedSecret: "testvalue",
-			vc: &fakeVaultClient{
-				v1response: versionedResponse{
-					expectedPath: engine + "/" + path,
-					response:     &api.Secret{Warnings: []string{"Invalid path for a versioned K/V secrets engine"}},
-					err:          nil,
-				},
-				v2response: versionedResponse{
-					expectedPath: engine + "/data/" + path,
-					response: &api.Secret{
-						Data: map[string]interface{}{
-							"data": map[string]interface{}{
-								"key": "testvalue",
-							},
-						},
-					},
-					err: nil,
-				},
-			},
-		},
-		"v1 returns connection error": {
-			expectedError: "check connection to the server",
-			vc: &fakeVaultClient{
-				v1response: versionedResponse{
-					expectedPath: engine + "/" + path,
-					response:     nil,
-					err:          fmt.Errorf("invalid character '<' looking for beginning of value"),
-				},
-			},
-		},
-		"v1 returns non-connection error": {
-			expectedError: "error fetching secret from vault",
-			vc: &fakeVaultClient{
-				v1response: versionedResponse{
-					expectedPath: engine + "/" + path,
-					response:     nil,
-					err:          fmt.Errorf("some other error"),
-				},
-			},
-		},
-		"v2 returns error": {
-			expectedError: "error fetching secret from vault",
-			vc: &fakeVaultClient{
-				v1response: versionedResponse{
-					expectedPath: engine + "/" + path,
-					response:     &api.Secret{Warnings: []string{"Invalid path for a versioned K/V secrets engine"}},
-					err: nil,
-				},
-				v2response: versionedResponse{
-					expectedPath: engine + "/data/" + path,
-					response:     nil,
-					err:          fmt.Errorf("some other error"),
-				},
-			},
-		},
-		"v2 returns empty response": {
-			expectedError: "couldn't find vault path",
-			vc: &fakeVaultClient{
-				v1response: versionedResponse{
-					expectedPath: engine + "/" + path,
-					response:     &api.Secret{Warnings: []string{"Invalid path for a versioned K/V secrets engine"}},
-					err: nil,
-				},
-				v2response: versionedResponse{
-					expectedPath: engine + "/data/" + path,
-					response:     nil,
-					err:          nil,
-				},
-			},
-		},
-		"secret key not found at v1 path": {
-			expectedError: "error fetching secret at engine",
-			vc: &fakeVaultClient{
-				v1response: versionedResponse{
-					expectedPath: engine + "/" + path,
-					response: &api.Secret{
-						Data: map[string]interface{}{
-							"incorrect-key": "testvalue",
-						},
-					},
-					err: nil,
-				},
-			},
-		},
-		"secret key not found at v2 path": {
-			expectedError: "error fetching secret at engine",
-			vc: &fakeVaultClient{
-				v1response: versionedResponse{
-					expectedPath: engine + "/" + path,
-					response:     &api.Secret{Warnings: []string{"Invalid path for a versioned K/V secrets engine"}},
-					err: nil,
-				},
-				v2response: versionedResponse{
-					expectedPath: engine + "/data/" + path,
-					response: &api.Secret{
-						Data: map[string]interface{}{
-							"data": map[string]interface{}{
-								"incorrect-key": "testvalue",
-							},
-						},
-					},
-					err: nil,
-				},
-			},
-		},
-	}
-	for testName, c := range cases {
-		t.Run(testName, func(t *testing.T) {
-			os.Setenv("VAULT_TOKEN", "my-token")
-			config := VaultConfig{
-				Enabled: true,
-				AuthMethod: "TOKEN",
-			}
-			c.vc.t = t
-			d := &VaultDecrypter{client: c.vc, vaultConfig: config, path: path, engine: engine, key: "key"}
-			d.setTokenFetcher()
-			s, err := d.Decrypt()
-			//s, err := d.fetchSecret()
-			if err != nil {
-				if c.expectedError != "" {
-					assert.Contains(t, err.Error(), c.expectedError)
-				} else {
-					t.Fatal(err)
-				}
-			}
-			assert.Equal(t, c.expectedSecret, s)
-		})
-	}
-}
-
-
 func TestVaultDecrypter_fetchSecret(t *testing.T) {
 	engine := "t1"
 	path := "t2"
@@ -349,8 +195,8 @@ func TestVaultDecrypter_fetchSecret(t *testing.T) {
 	for testName, c := range cases {
 		t.Run(testName, func(t *testing.T) {
 			c.vc.t = t
-			d := &VaultDecrypter{client: c.vc, path: path, engine: engine, key: "key"}
-			s, err := d.fetchSecret()
+			d := &VaultDecrypter{path: path, engine: engine, key: "key"}
+			s, err := d.fetchSecret(c.vc)
 			if err != nil {
 				if c.expectedError != "" {
 					assert.Contains(t, err.Error(), c.expectedError)
@@ -548,6 +394,10 @@ func TestValidateVaultConfig(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		"empty config": {
+			config: VaultConfig{},
+			wantErr: true,
+		},
 		"missing URL": {
 			config: VaultConfig{
 				Enabled:    true,
@@ -641,6 +491,14 @@ func TestValidateVaultConfig(t *testing.T) {
 				Username:     "user",
 				Password:     "password",
 				UserAuthPath: "",
+			},
+			wantErr: true,
+		},
+		"token auth missing env var": {
+			config: VaultConfig{
+				Enabled:    true,
+				Url:        "vault.com",
+				AuthMethod: "TOKEN",
 			},
 			wantErr: true,
 		},

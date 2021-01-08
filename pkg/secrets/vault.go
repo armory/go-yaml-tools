@@ -36,7 +36,6 @@ type VaultDecrypter struct {
 	isFile        bool
 	vaultConfig   VaultConfig
 	tokenFetcher  TokenFetcher
-	client        VaultClient
 }
 
 type VaultClient interface {
@@ -55,10 +54,6 @@ func RegisterVaultConfig(vaultConfig VaultConfig) error {
 			return nil, err
 		}
 		if err := vd.setTokenFetcher(); err != nil {
-			return nil, err
-		}
-		//client, err := vd.getVaultClient()
-		if err := vd.setVaultClient(); err != nil {
 			return nil, err
 		}
 		return vd, nil
@@ -104,7 +99,6 @@ func (u UserPassTokenFetcher) fetchToken(client VaultClient) (string, error) {
 type KubernetesServiceAccountTokenFetcher struct {
 	role string
 	path string
-	//tokenFile string
 	fileReader fileReader
 }
 
@@ -164,14 +158,18 @@ func (decrypter *VaultDecrypter) Decrypt() (string, error) {
 			return "", err
 		}
 	}
-	secret, err := decrypter.fetchSecret()
+	client, err := decrypter.getVaultClient()
+	if err != nil {
+		return "", err
+	}
+	secret, err := decrypter.fetchSecret(client)
 	if err != nil && strings.Contains(err.Error(), "403") {
 		// get new token and retry in case our saved token is no longer valid
 		err := decrypter.setToken()
 		if err != nil {
 			return "", err
 		}
-		secret, err = decrypter.fetchSecret()
+		secret, err = decrypter.fetchSecret(client)
 	}
 	if err != nil {
 		return "", err
@@ -208,7 +206,7 @@ func (v *VaultDecrypter) parseSyntax(params string) error {
 		return fmt.Errorf("secret format error - 'e' for engine is required")
 	}
 	if v.path == "" {
-		return fmt.Errorf("secret format error - 'p' for userAuthPath is required (replaces deprecated 'n' param)")
+		return fmt.Errorf("secret format error - 'p' for path is required (replaces deprecated 'n' param)")
 	}
 	if v.key == "" {
 		return fmt.Errorf("secret format error - 'k' for key is required")
@@ -240,11 +238,11 @@ func validateVaultConfig(vaultConfig VaultConfig) error {
 		}
 	case "KUBERNETES":
 		if vaultConfig.Path == "" || vaultConfig.Role == "" {
-			return fmt.Errorf("userAuthPath and role both required for Kubernetes auth method")
+			return fmt.Errorf("path and role both required for KUBERNETES auth method")
 		}
 	case "USERPASS":
 		if vaultConfig.Username == "" || vaultConfig.Password == "" || vaultConfig.UserAuthPath == "" {
-			return fmt.Errorf("username, password and userAuthPath are required for user/password auth method")
+			return fmt.Errorf("username, password and userAuthPath are required for USERPASS auth method")
 		}
 	default:
 		return fmt.Errorf("unknown Vault secrets auth method: %q", vaultConfig.AuthMethod)
@@ -254,7 +252,11 @@ func validateVaultConfig(vaultConfig VaultConfig) error {
 }
 
 func (decrypter *VaultDecrypter) setToken() error {
-	token, err := decrypter.tokenFetcher.fetchToken(decrypter.client)
+	client, err := decrypter.getVaultClient()
+	if err != nil {
+		return err
+	}
+	token, err := decrypter.tokenFetcher.fetchToken(client)
 	if err != nil {
 		return fmt.Errorf("error fetching vault token - %s", err)
 	}
@@ -262,13 +264,12 @@ func (decrypter *VaultDecrypter) setToken() error {
 	return nil
 }
 
-func (decrypter *VaultDecrypter) setVaultClient() error {
+func (decrypter *VaultDecrypter) getVaultClient() (*api.Logical, error) {
 	client, err := decrypter.newAPIClient()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	decrypter.client = client.Logical()
-	return nil
+	return client.Logical(), nil
 }
 
 func (decrypter *VaultDecrypter) newAPIClient() (*api.Client, error) {
@@ -288,10 +289,10 @@ func (decrypter *VaultDecrypter) newAPIClient() (*api.Client, error) {
 }
 
 
-func (decrypter *VaultDecrypter) fetchSecret() (string, error) {
+func (decrypter *VaultDecrypter) fetchSecret(client VaultClient) (string, error) {
 	path := decrypter.engine + "/" + decrypter.path
 	log.Debugf("attempting to read secret at KV v1 path: %s", path)
-	secretMapping, err := decrypter.client.Read(path)
+	secretMapping, err := client.Read(path)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid character '<' looking for beginning of value") {
 			// some connection errors aren't properly caught, and the vault client tries to parse <nil>
@@ -305,35 +306,13 @@ func (decrypter *VaultDecrypter) fetchSecret() (string, error) {
 		// try again using K/V v2 path
 		path = decrypter.engine + "/data/" + decrypter.path
 		log.Debugf("attempting to read secret at KV v2 path: %s", path)
-		secretMapping, err = decrypter.client.Read(path)
+		secretMapping, err = client.Read(path)
 		if err != nil {
 			return "", fmt.Errorf("error fetching secret from vault: %s", err)
 		}
-		//if secretMapping == nil {
-		//	return "", fmt.Errorf("couldn't find vault path %s under engine %s", decrypter.path, decrypter.engine)
-		//}
-		//successfulVersion = "v2"
 	}
 
 	return decrypter.parseResults(secretMapping)
-
-	//if results == nil {
-	//	return "", fmt.Errorf("couldn't find vault path %s under engine %s", decrypter.path, decrypter.engine)
-	//}
-	//
-	//mapping := results.Data
-	//if data, ok := mapping["data"]; ok { // one more nesting of "data" if using K/V v2
-	//	if submap, ok := data.(map[string]interface{}); ok {
-	//		mapping = submap
-	//	}
-	//}
-	//
-	//decrypted, ok := mapping[decrypter.key].(string)
-	//if !ok {
-	//	return "", fmt.Errorf("error fetching secret at engine: %s, path: %s and key %s", decrypter.engine, decrypter.path, decrypter.key)
-	//}
-	//log.Debugf("successfully fetched secret")
-	//return decrypted, nil
 }
 
 func (decrypter *VaultDecrypter) parseResults(secretMapping *api.Secret) (string, error) {
