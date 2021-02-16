@@ -106,6 +106,27 @@ func TestVaultDecrypter_fetchSecret(t *testing.T) {
 				},
 			},
 		},
+		"v1 path permission denied, attempt v2 path": {
+			expectedSecret: "testvalue",
+			vc: &fakeVaultClient{
+				v1response: versionedResponse{
+					expectedPath: engine + "/" + path,
+					response:     nil,
+					err:          errors.New("permission denied"),
+				},
+				v2response: versionedResponse{
+					expectedPath: engine + "/data/" + path,
+					response: &api.Secret{
+						Data: map[string]interface{}{
+							"data": map[string]interface{}{
+								"key": "testvalue",
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+		},
 		"v1 returns connection error": {
 			expectedError: "check connection to the server",
 			vc: &fakeVaultClient{
@@ -794,37 +815,4 @@ func TestParseVaultSecret(t *testing.T) {
 		})
 	}
 }
-
-//var userpassYaml = `
-//    secrets:
-//      vault:
-//        enabled: true
-//        url: https://vault.engineering.armory.io
-//        username: name
-//        password: pw
-//        userAuthPath: userpass
-//        authMethod: USERPASS
-//`
-//func Test_DecodeVaultConfig(t *testing.T) {
-//	cases := map[string]struct {
-//		yaml string
-//	}{
-//		"happy path": {
-//			yaml: userpassYaml,
-//		},
-//	}
-//	for testName, c := range cases {
-//		t.Run(testName, func(t *testing.T) {
-//
-//			any := map[interface{}]interface{}{}
-//			err := yaml.Unmarshal([]byte(c.yaml), &any)
-//			assert.Nil(t, err)
-//
-//			config, err := DecodeVaultConfig(any)
-//			assert.Nil(t, err)
-//			assert.Equal(t, "name", config.Username)
-//		})
-//	}
-//}
-
 
