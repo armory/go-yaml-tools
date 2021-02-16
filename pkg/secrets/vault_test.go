@@ -85,12 +85,54 @@ func TestVaultDecrypter_fetchSecret(t *testing.T) {
 				},
 			},
 		},
-		"calling v2 path returns a secret": {
+		"v1 returns warning, v2 returns a secret": {
 			expectedSecret: "testvalue",
 			vc: &fakeVaultClient{
 				v1response: versionedResponse{
 					expectedPath: engine + "/" + path,
 					response:     &api.Secret{Warnings: []string{"Invalid path for a versioned K/V secrets engine"}},
+					err:          nil,
+				},
+				v2response: versionedResponse{
+					expectedPath: engine + "/data/" + path,
+					response: &api.Secret{
+						Data: map[string]interface{}{
+							"data": map[string]interface{}{
+								"key": "testvalue",
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+		},
+		"v1 returns error, v2 returns a secret": {
+			expectedSecret: "testvalue",
+			vc: &fakeVaultClient{
+				v1response: versionedResponse{
+					expectedPath: engine + "/" + path,
+					response:     &api.Secret{},
+					err:          fmt.Errorf("permission denied"),
+				},
+				v2response: versionedResponse{
+					expectedPath: engine + "/data/" + path,
+					response: &api.Secret{
+						Data: map[string]interface{}{
+							"data": map[string]interface{}{
+								"key": "testvalue",
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+		},
+		"v1 returns empty response, v2 returns a secret": {
+			expectedSecret: "testvalue",
+			vc: &fakeVaultClient{
+				v1response: versionedResponse{
+					expectedPath: engine + "/" + path,
+					response:     nil,
 					err:          nil,
 				},
 				v2response: versionedResponse{
@@ -116,11 +158,16 @@ func TestVaultDecrypter_fetchSecret(t *testing.T) {
 				},
 			},
 		},
-		"v1 returns non-connection error": {
+		"v1 returns non-connection error, v2 returns error": {
 			expectedError: "error fetching secret from vault",
 			vc: &fakeVaultClient{
 				v1response: versionedResponse{
 					expectedPath: engine + "/" + path,
+					response:     nil,
+					err:          fmt.Errorf("some other error"),
+				},
+				v2response: versionedResponse{
+					expectedPath: engine + "/data/" + path,
 					response:     nil,
 					err:          fmt.Errorf("some other error"),
 				},
@@ -795,36 +842,47 @@ func TestParseVaultSecret(t *testing.T) {
 	}
 }
 
-//var userpassYaml = `
-//    secrets:
-//      vault:
-//        enabled: true
-//        url: https://vault.engineering.armory.io
-//        username: name
-//        password: pw
-//        userAuthPath: userpass
-//        authMethod: USERPASS
-//`
-//func Test_DecodeVaultConfig(t *testing.T) {
-//	cases := map[string]struct {
-//		yaml string
-//	}{
-//		"happy path": {
-//			yaml: userpassYaml,
-//		},
-//	}
-//	for testName, c := range cases {
-//		t.Run(testName, func(t *testing.T) {
-//
-//			any := map[interface{}]interface{}{}
-//			err := yaml.Unmarshal([]byte(c.yaml), &any)
-//			assert.Nil(t, err)
-//
-//			config, err := DecodeVaultConfig(any)
-//			assert.Nil(t, err)
-//			assert.Equal(t, "name", config.Username)
-//		})
-//	}
-//}
+func TestRetryableError(t *testing.T) {
+	cases := map[string]struct {
+		secret        *api.Secret
+		err error
+		expectedResult   bool
+	}{
+		"permission denied error returns true": {
+			secret: nil,
+			err: errors.New("permission denied"),
+			expectedResult: true,
+		},
+		"nil mapping returns true": {
+			secret: nil,
+			expectedResult: true,
+		},
+		"invalid path warning returns true": {
+			secret: &api.Secret{
+				Warnings: []string{"Invalid path for a versioned K/V secrets engine"},
+			},
+			expectedResult: true,
+		},
+		"nil warning returns false": {
+			secret: &api.Secret{
+				Warnings: nil,
+			},
+			expectedResult: false,
+		},
+		"empty slice warning returns false": {
+			secret: &api.Secret{
+				Warnings: []string{},
+			},
+			expectedResult: false,
+		},
+	}
+	for testName, c := range cases {
+		t.Run(testName, func(t *testing.T) {
+			actual := containsRetryableError(c.err, c.secret)
+			assert.Equal(t, c.expectedResult, actual)
+		})
+	}
+}
+
 
 

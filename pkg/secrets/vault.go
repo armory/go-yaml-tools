@@ -291,28 +291,46 @@ func (decrypter *VaultDecrypter) newAPIClient() (*api.Client, error) {
 
 func (decrypter *VaultDecrypter) fetchSecret(client VaultClient) (string, error) {
 	path := decrypter.engine + "/" + decrypter.path
-	log.Debugf("attempting to read secret at KV v1 path: %s", path)
-	secretMapping, err := client.Read(path)
-	if err != nil {
-		if strings.Contains(err.Error(), "invalid character '<' looking for beginning of value") {
+	log.Infof("attempting to read secret at KV v1 path: %s", path)
+	secretMapping, v1err := client.Read(path)
+	if v1err != nil {
+		if strings.Contains(v1err.Error(), "invalid character '<' looking for beginning of value") {
 			// some connection errors aren't properly caught, and the vault client tries to parse <nil>
 			return "", fmt.Errorf("error fetching secret from vault - check connection to the server: %s",
 				decrypter.vaultConfig.Url)
 		}
-		return "", fmt.Errorf("error fetching secret from vault: %s", err)
 	}
 
-	if warnings := secretMapping.Warnings; containsRetryableWarning(warnings) {
+	var v2err error
+	if containsRetryableError(v1err, secretMapping) {
 		// try again using K/V v2 path
 		path = decrypter.engine + "/data/" + decrypter.path
-		log.Debugf("attempting to read secret at KV v2 path: %s", path)
-		secretMapping, err = client.Read(path)
-		if err != nil {
-			return "", fmt.Errorf("error fetching secret from vault: %s", err)
-		}
+		log.Infof("attempting to read secret at KV v2 path: %s", path)
+		secretMapping, v2err = client.Read(path)
+	}
+
+	if v2err != nil {
+		log.Errorf("error reading secret at KV v1 path and KV v2 path")
+		log.Errorf("KV v1 error: %s", v1err)
+		log.Errorf("KV v2 error: %s", v2err)
+		return "", fmt.Errorf("error fetching secret from vault")
 	}
 
 	return decrypter.parseResults(secretMapping)
+}
+
+func containsRetryableError(err error, secret *api.Secret) bool {
+	if err != nil || secret == nil {
+		return true
+	}
+	warnings := secret.Warnings
+	for _, w := range warnings {
+		switch {
+		case strings.Contains(w, "Invalid path for a versioned K/V secrets engine"):
+			return true
+		}
+	}
+	return false
 }
 
 func (decrypter *VaultDecrypter) parseResults(secretMapping *api.Secret) (string, error) {
@@ -333,19 +351,6 @@ func (decrypter *VaultDecrypter) parseResults(secretMapping *api.Secret) (string
 	}
 	log.Debugf("successfully fetched secret")
 	return decrypted, nil
-}
-
-func containsRetryableWarning(warnings []string) bool {
-	if warnings == nil {
-		return false
-	}
-	for _, w := range warnings {
-		switch {
-		case strings.Contains(w, "Invalid path for a versioned K/V secrets engine"):
-			return true
-		}
-	}
-	return false
 }
 
 func DecodeVaultConfig(vaultYaml map[interface{}]interface{}) (*VaultConfig, error) {
