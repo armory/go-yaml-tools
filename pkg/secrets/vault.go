@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -90,10 +91,18 @@ func (u UserPassTokenFetcher) fetchToken(client VaultClient) (string, error) {
 	log.Infof("logging into vault with USERPASS auth at: %s", loginPath)
 	secret, err := client.Write(loginPath, data)
 	if err != nil {
-		return "", fmt.Errorf("error logging into vault using user/password auth: %s", err)
+		return handleLoginErrors(err)
 	}
 
 	return secret.Auth.ClientToken, nil
+}
+
+func handleLoginErrors(err error) (string, error) {
+	if _, ok := err.(*json.SyntaxError); ok {
+		// some connection errors aren't properly caught, and the vault client tries to parse <nil>
+		return "", fmt.Errorf("error fetching secret from vault - check connection to the server")
+	}
+	return "", fmt.Errorf("error logging into vault: %s", err)
 }
 
 type KubernetesServiceAccountTokenFetcher struct {
@@ -119,7 +128,7 @@ func (k KubernetesServiceAccountTokenFetcher) fetchToken(client VaultClient) (st
 	log.Infof("logging into vault with KUBERNETES auth at: %s", loginPath)
 	secret, err := client.Write(loginPath, data)
 	if err != nil {
-		return "", fmt.Errorf("error logging into vault using kubernetes auth: %s", err)
+		return handleLoginErrors(err)
 	}
 
 	return secret.Auth.ClientToken, nil
@@ -294,7 +303,7 @@ func (decrypter *VaultDecrypter) fetchSecret(client VaultClient) (string, error)
 	log.Infof("attempting to read secret at KV v1 path: %s", path)
 	secretMapping, v1err := client.Read(path)
 	if v1err != nil {
-		if strings.Contains(v1err.Error(), "invalid character '<' looking for beginning of value") {
+		if _, ok := v1err.(*json.SyntaxError); ok {
 			// some connection errors aren't properly caught, and the vault client tries to parse <nil>
 			return "", fmt.Errorf("error fetching secret from vault - check connection to the server: %s",
 				decrypter.vaultConfig.Url)
@@ -347,7 +356,7 @@ func (decrypter *VaultDecrypter) parseResults(secretMapping *api.Secret) (string
 
 	decrypted, ok := mapping[decrypter.key].(string)
 	if !ok {
-		return "", fmt.Errorf("error fetching secret at engine: %s, path: %s and key %s", decrypter.engine, decrypter.path, decrypter.key)
+		return "", fmt.Errorf("key %q not found at engine: %s, path: %s", decrypter.key, decrypter.engine, decrypter.path)
 	}
 	log.Debugf("successfully fetched secret")
 	return decrypted, nil
