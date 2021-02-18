@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -90,7 +91,7 @@ func (u UserPassTokenFetcher) fetchToken(client VaultClient) (string, error) {
 	log.Infof("logging into vault with USERPASS auth at: %s", loginPath)
 	secret, err := client.Write(loginPath, data)
 	if err != nil {
-		return "", fmt.Errorf("error logging into vault using user/password auth: %s", err)
+		return handleLoginErrors(err)
 	}
 
 	return secret.Auth.ClientToken, nil
@@ -119,10 +120,18 @@ func (k KubernetesServiceAccountTokenFetcher) fetchToken(client VaultClient) (st
 	log.Infof("logging into vault with KUBERNETES auth at: %s", loginPath)
 	secret, err := client.Write(loginPath, data)
 	if err != nil {
-		return "", fmt.Errorf("error logging into vault using kubernetes auth: %s", err)
+		return handleLoginErrors(err)
 	}
 
 	return secret.Auth.ClientToken, nil
+}
+
+func handleLoginErrors(err error) (string, error) {
+	if _, ok := err.(*json.SyntaxError); ok {
+		// some connection errors aren't properly caught, and the vault client tries to parse <nil>
+		return "", fmt.Errorf("error fetching secret from vault - check connection to the server")
+	}
+	return "", fmt.Errorf("error logging into vault: %s", err)
 }
 
 func (decrypter *VaultDecrypter) setTokenFetcher() error {
@@ -291,28 +300,46 @@ func (decrypter *VaultDecrypter) newAPIClient() (*api.Client, error) {
 
 func (decrypter *VaultDecrypter) fetchSecret(client VaultClient) (string, error) {
 	path := decrypter.engine + "/" + decrypter.path
-	log.Debugf("attempting to read secret at KV v1 path: %s", path)
-	secretMapping, err := client.Read(path)
-	if err != nil {
-		if strings.Contains(err.Error(), "invalid character '<' looking for beginning of value") {
+	log.Infof("attempting to read secret at KV v1 path: %s", path)
+	secretMapping, v1err := client.Read(path)
+	if v1err != nil {
+		if _, ok := v1err.(*json.SyntaxError); ok {
 			// some connection errors aren't properly caught, and the vault client tries to parse <nil>
 			return "", fmt.Errorf("error fetching secret from vault - check connection to the server: %s",
 				decrypter.vaultConfig.Url)
 		}
-		return "", fmt.Errorf("error fetching secret from vault: %s", err)
 	}
 
-	if warnings := secretMapping.Warnings; containsRetryableWarning(warnings) {
+	var v2err error
+	if containsRetryableError(v1err, secretMapping) {
 		// try again using K/V v2 path
 		path = decrypter.engine + "/data/" + decrypter.path
-		log.Debugf("attempting to read secret at KV v2 path: %s", path)
-		secretMapping, err = client.Read(path)
-		if err != nil {
-			return "", fmt.Errorf("error fetching secret from vault: %s", err)
-		}
+		log.Infof("attempting to read secret at KV v2 path: %s", path)
+		secretMapping, v2err = client.Read(path)
+	}
+
+	if v2err != nil {
+		log.Errorf("error reading secret at KV v1 path and KV v2 path")
+		log.Errorf("KV v1 error: %s", v1err)
+		log.Errorf("KV v2 error: %s", v2err)
+		return "", fmt.Errorf("error fetching secret from vault")
 	}
 
 	return decrypter.parseResults(secretMapping)
+}
+
+func containsRetryableError(err error, secret *api.Secret) bool {
+	if err != nil || secret == nil {
+		return true
+	}
+	warnings := secret.Warnings
+	for _, w := range warnings {
+		switch {
+		case strings.Contains(w, "Invalid path for a versioned K/V secrets engine"):
+			return true
+		}
+	}
+	return false
 }
 
 func (decrypter *VaultDecrypter) parseResults(secretMapping *api.Secret) (string, error) {
@@ -329,23 +356,10 @@ func (decrypter *VaultDecrypter) parseResults(secretMapping *api.Secret) (string
 
 	decrypted, ok := mapping[decrypter.key].(string)
 	if !ok {
-		return "", fmt.Errorf("error fetching secret at engine: %s, path: %s and key %s", decrypter.engine, decrypter.path, decrypter.key)
+		return "", fmt.Errorf("key %q not found at engine: %s, path: %s", decrypter.key, decrypter.engine, decrypter.path)
 	}
 	log.Debugf("successfully fetched secret")
 	return decrypted, nil
-}
-
-func containsRetryableWarning(warnings []string) bool {
-	if warnings == nil {
-		return false
-	}
-	for _, w := range warnings {
-		switch {
-		case strings.Contains(w, "Invalid path for a versioned K/V secrets engine"):
-			return true
-		}
-	}
-	return false
 }
 
 func DecodeVaultConfig(vaultYaml map[interface{}]interface{}) (*VaultConfig, error) {

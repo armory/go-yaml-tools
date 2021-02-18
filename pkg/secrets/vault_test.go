@@ -2,9 +2,11 @@ package secrets
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/vault/api"
@@ -85,12 +87,54 @@ func TestVaultDecrypter_fetchSecret(t *testing.T) {
 				},
 			},
 		},
-		"calling v2 path returns a secret": {
+		"v1 returns warning, v2 returns a secret": {
 			expectedSecret: "testvalue",
 			vc: &fakeVaultClient{
 				v1response: versionedResponse{
 					expectedPath: engine + "/" + path,
 					response:     &api.Secret{Warnings: []string{"Invalid path for a versioned K/V secrets engine"}},
+					err:          nil,
+				},
+				v2response: versionedResponse{
+					expectedPath: engine + "/data/" + path,
+					response: &api.Secret{
+						Data: map[string]interface{}{
+							"data": map[string]interface{}{
+								"key": "testvalue",
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+		},
+		"v1 returns error, v2 returns a secret": {
+			expectedSecret: "testvalue",
+			vc: &fakeVaultClient{
+				v1response: versionedResponse{
+					expectedPath: engine + "/" + path,
+					response:     &api.Secret{},
+					err:          fmt.Errorf("permission denied"),
+				},
+				v2response: versionedResponse{
+					expectedPath: engine + "/data/" + path,
+					response: &api.Secret{
+						Data: map[string]interface{}{
+							"data": map[string]interface{}{
+								"key": "testvalue",
+							},
+						},
+					},
+					err: nil,
+				},
+			},
+		},
+		"v1 returns empty response, v2 returns a secret": {
+			expectedSecret: "testvalue",
+			vc: &fakeVaultClient{
+				v1response: versionedResponse{
+					expectedPath: engine + "/" + path,
+					response:     nil,
 					err:          nil,
 				},
 				v2response: versionedResponse{
@@ -112,15 +156,20 @@ func TestVaultDecrypter_fetchSecret(t *testing.T) {
 				v1response: versionedResponse{
 					expectedPath: engine + "/" + path,
 					response:     nil,
-					err:          fmt.Errorf("invalid character '<' looking for beginning of value"),
+					err:          &json.SyntaxError{},
 				},
 			},
 		},
-		"v1 returns non-connection error": {
+		"v1 returns non-connection error, v2 returns error": {
 			expectedError: "error fetching secret from vault",
 			vc: &fakeVaultClient{
 				v1response: versionedResponse{
 					expectedPath: engine + "/" + path,
+					response:     nil,
+					err:          fmt.Errorf("some other error"),
+				},
+				v2response: versionedResponse{
+					expectedPath: engine + "/data/" + path,
 					response:     nil,
 					err:          fmt.Errorf("some other error"),
 				},
@@ -157,7 +206,7 @@ func TestVaultDecrypter_fetchSecret(t *testing.T) {
 			},
 		},
 		"secret key not found at v1 path": {
-			expectedError: "error fetching secret at engine",
+			expectedError: "not found at engine",
 			vc: &fakeVaultClient{
 				v1response: versionedResponse{
 					expectedPath: engine + "/" + path,
@@ -171,7 +220,7 @@ func TestVaultDecrypter_fetchSecret(t *testing.T) {
 			},
 		},
 		"secret key not found at v2 path": {
-			expectedError: "error fetching secret at engine",
+			expectedError: "not found at engine",
 			vc: &fakeVaultClient{
 				v1response: versionedResponse{
 					expectedPath: engine + "/" + path,
@@ -215,7 +264,7 @@ func TestUserPassAuth(t *testing.T) {
 		client       *MockVaultClient
 		expectedPath string
 		expectedData map[string]interface{}
-		expectError  bool
+		expectedError string
 	}{
 		"happy path": {
 			config: VaultConfig{
@@ -236,7 +285,7 @@ func TestUserPassAuth(t *testing.T) {
 			},
 			expectedPath: "auth/path/login/user",
 			expectedData: map[string]interface{}{"password": "password"},
-			expectError:  false,
+			expectedError:  "",
 		},
 		"error from client gets returned": {
 			config: VaultConfig{
@@ -253,7 +302,24 @@ func TestUserPassAuth(t *testing.T) {
 			},
 			expectedPath: "auth/path/login/user",
 			expectedData: map[string]interface{}{"password": "password"},
-			expectError:  true,
+			expectedError:  "error logging into vault:",
+		},
+		"connection error from client gets caught": {
+			config: VaultConfig{
+				Enabled:      true,
+				Url:          "vault.com",
+				AuthMethod:   "USERPASS",
+				Username:     "user",
+				Password:     "password",
+				UserAuthPath: "path",
+			},
+			client: &MockVaultClient{
+				token:    "",
+				writeErr: &json.SyntaxError{},
+			},
+			expectedPath: "auth/path/login/user",
+			expectedData: map[string]interface{}{"password": "password"},
+			expectedError:  "check connection to the server",
 		},
 	}
 	for testName, c := range cases {
@@ -265,8 +331,12 @@ func TestUserPassAuth(t *testing.T) {
 			}
 			d.setTokenFetcher()
 			token, err := d.tokenFetcher.fetchToken(c.client)
-			assert.Equal(t, c.expectError, err != nil)
 			assert.Equal(t, c.client.token, token)
+			if c.expectedError != "" {
+				assert.True(t, strings.Contains(err.Error(), c.expectedError))
+			} else {
+				assert.Nil(t, err)
+			}
 
 			// assert Write() method called with expected arguments
 			c.client.AssertExpectations(t)
@@ -287,7 +357,7 @@ func TestKubernetesAuth(t *testing.T) {
 		expectedPath  string
 		expectedData  map[string]interface{}
 		expectedToken string
-		expectError   bool
+		expectedError   string
 	}{
 		"happy path": {
 			config: VaultConfig{
@@ -311,7 +381,7 @@ func TestKubernetesAuth(t *testing.T) {
 				"jwt":  mockJwt,
 			},
 			expectedToken: "vault-token",
-			expectError:   false,
+			expectedError: "",
 		},
 		"error from client gets returned": {
 			config: VaultConfig{
@@ -330,8 +400,28 @@ func TestKubernetesAuth(t *testing.T) {
 				"role": "role",
 				"jwt":  mockJwt,
 			},
-			expectError: true,
+			expectedError: "error logging into vault:",
 		},
+		"connection error gets caught": {
+			config: VaultConfig{
+				Enabled:    true,
+				Url:        "vault.com",
+				AuthMethod: "KUBERNETES",
+				Role:       "role",
+				Path:       "kubernetes",
+			},
+			client: &MockVaultClient{
+				token:    "",
+				writeErr: &json.SyntaxError{},
+			},
+			expectedPath: "auth/kubernetes/login",
+			expectedData: map[string]interface{}{
+				"role": "role",
+				"jwt":  mockJwt,
+			},
+			expectedError:  "check connection to the server",
+		},
+
 	}
 	for testName, c := range cases {
 		t.Run(testName, func(t *testing.T) {
@@ -343,9 +433,12 @@ func TestKubernetesAuth(t *testing.T) {
 				fileReader: mockFileReader,
 			}
 			token, err := tokenFetcher.fetchToken(c.client)
-			assert.Equal(t, c.expectError, err != nil)
 			assert.Equal(t, c.expectedToken, token)
-
+			if c.expectedError != "" {
+				assert.True(t, strings.Contains(err.Error(), c.expectedError))
+			} else {
+				assert.Nil(t, err)
+			}
 			// assert Write() method called with expected arguments
 			c.client.AssertExpectations(t)
 		})
@@ -795,36 +888,47 @@ func TestParseVaultSecret(t *testing.T) {
 	}
 }
 
-//var userpassYaml = `
-//    secrets:
-//      vault:
-//        enabled: true
-//        url: https://vault.engineering.armory.io
-//        username: name
-//        password: pw
-//        userAuthPath: userpass
-//        authMethod: USERPASS
-//`
-//func Test_DecodeVaultConfig(t *testing.T) {
-//	cases := map[string]struct {
-//		yaml string
-//	}{
-//		"happy path": {
-//			yaml: userpassYaml,
-//		},
-//	}
-//	for testName, c := range cases {
-//		t.Run(testName, func(t *testing.T) {
-//
-//			any := map[interface{}]interface{}{}
-//			err := yaml.Unmarshal([]byte(c.yaml), &any)
-//			assert.Nil(t, err)
-//
-//			config, err := DecodeVaultConfig(any)
-//			assert.Nil(t, err)
-//			assert.Equal(t, "name", config.Username)
-//		})
-//	}
-//}
+func TestRetryableError(t *testing.T) {
+	cases := map[string]struct {
+		secret        *api.Secret
+		err error
+		expectedResult   bool
+	}{
+		"permission denied error returns true": {
+			secret: nil,
+			err: errors.New("permission denied"),
+			expectedResult: true,
+		},
+		"nil mapping returns true": {
+			secret: nil,
+			expectedResult: true,
+		},
+		"invalid path warning returns true": {
+			secret: &api.Secret{
+				Warnings: []string{"Invalid path for a versioned K/V secrets engine"},
+			},
+			expectedResult: true,
+		},
+		"nil warning returns false": {
+			secret: &api.Secret{
+				Warnings: nil,
+			},
+			expectedResult: false,
+		},
+		"empty slice warning returns false": {
+			secret: &api.Secret{
+				Warnings: []string{},
+			},
+			expectedResult: false,
+		},
+	}
+	for testName, c := range cases {
+		t.Run(testName, func(t *testing.T) {
+			actual := containsRetryableError(c.err, c.secret)
+			assert.Equal(t, c.expectedResult, actual)
+		})
+	}
+}
+
 
 
