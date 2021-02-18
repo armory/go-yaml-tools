@@ -2,9 +2,11 @@ package secrets
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/vault/api"
@@ -154,7 +156,7 @@ func TestVaultDecrypter_fetchSecret(t *testing.T) {
 				v1response: versionedResponse{
 					expectedPath: engine + "/" + path,
 					response:     nil,
-					err:          fmt.Errorf("invalid character '<' looking for beginning of value"),
+					err:          &json.SyntaxError{},
 				},
 			},
 		},
@@ -204,7 +206,7 @@ func TestVaultDecrypter_fetchSecret(t *testing.T) {
 			},
 		},
 		"secret key not found at v1 path": {
-			expectedError: "error fetching secret at engine",
+			expectedError: "not found at engine",
 			vc: &fakeVaultClient{
 				v1response: versionedResponse{
 					expectedPath: engine + "/" + path,
@@ -218,7 +220,7 @@ func TestVaultDecrypter_fetchSecret(t *testing.T) {
 			},
 		},
 		"secret key not found at v2 path": {
-			expectedError: "error fetching secret at engine",
+			expectedError: "not found at engine",
 			vc: &fakeVaultClient{
 				v1response: versionedResponse{
 					expectedPath: engine + "/" + path,
@@ -262,7 +264,7 @@ func TestUserPassAuth(t *testing.T) {
 		client       *MockVaultClient
 		expectedPath string
 		expectedData map[string]interface{}
-		expectError  bool
+		expectedError string
 	}{
 		"happy path": {
 			config: VaultConfig{
@@ -283,7 +285,7 @@ func TestUserPassAuth(t *testing.T) {
 			},
 			expectedPath: "auth/path/login/user",
 			expectedData: map[string]interface{}{"password": "password"},
-			expectError:  false,
+			expectedError:  "",
 		},
 		"error from client gets returned": {
 			config: VaultConfig{
@@ -300,7 +302,24 @@ func TestUserPassAuth(t *testing.T) {
 			},
 			expectedPath: "auth/path/login/user",
 			expectedData: map[string]interface{}{"password": "password"},
-			expectError:  true,
+			expectedError:  "error logging into vault:",
+		},
+		"connection error from client gets caught": {
+			config: VaultConfig{
+				Enabled:      true,
+				Url:          "vault.com",
+				AuthMethod:   "USERPASS",
+				Username:     "user",
+				Password:     "password",
+				UserAuthPath: "path",
+			},
+			client: &MockVaultClient{
+				token:    "",
+				writeErr: &json.SyntaxError{},
+			},
+			expectedPath: "auth/path/login/user",
+			expectedData: map[string]interface{}{"password": "password"},
+			expectedError:  "check connection to the server",
 		},
 	}
 	for testName, c := range cases {
@@ -312,8 +331,12 @@ func TestUserPassAuth(t *testing.T) {
 			}
 			d.setTokenFetcher()
 			token, err := d.tokenFetcher.fetchToken(c.client)
-			assert.Equal(t, c.expectError, err != nil)
 			assert.Equal(t, c.client.token, token)
+			if c.expectedError != "" {
+				assert.True(t, strings.Contains(err.Error(), c.expectedError))
+			} else {
+				assert.Nil(t, err)
+			}
 
 			// assert Write() method called with expected arguments
 			c.client.AssertExpectations(t)
@@ -334,7 +357,7 @@ func TestKubernetesAuth(t *testing.T) {
 		expectedPath  string
 		expectedData  map[string]interface{}
 		expectedToken string
-		expectError   bool
+		expectedError   string
 	}{
 		"happy path": {
 			config: VaultConfig{
@@ -358,7 +381,7 @@ func TestKubernetesAuth(t *testing.T) {
 				"jwt":  mockJwt,
 			},
 			expectedToken: "vault-token",
-			expectError:   false,
+			expectedError: "",
 		},
 		"error from client gets returned": {
 			config: VaultConfig{
@@ -377,8 +400,28 @@ func TestKubernetesAuth(t *testing.T) {
 				"role": "role",
 				"jwt":  mockJwt,
 			},
-			expectError: true,
+			expectedError: "error logging into vault:",
 		},
+		"connection error gets caught": {
+			config: VaultConfig{
+				Enabled:    true,
+				Url:        "vault.com",
+				AuthMethod: "KUBERNETES",
+				Role:       "role",
+				Path:       "kubernetes",
+			},
+			client: &MockVaultClient{
+				token:    "",
+				writeErr: &json.SyntaxError{},
+			},
+			expectedPath: "auth/kubernetes/login",
+			expectedData: map[string]interface{}{
+				"role": "role",
+				"jwt":  mockJwt,
+			},
+			expectedError:  "check connection to the server",
+		},
+
 	}
 	for testName, c := range cases {
 		t.Run(testName, func(t *testing.T) {
@@ -390,9 +433,12 @@ func TestKubernetesAuth(t *testing.T) {
 				fileReader: mockFileReader,
 			}
 			token, err := tokenFetcher.fetchToken(c.client)
-			assert.Equal(t, c.expectError, err != nil)
 			assert.Equal(t, c.expectedToken, token)
-
+			if c.expectedError != "" {
+				assert.True(t, strings.Contains(err.Error(), c.expectedError))
+			} else {
+				assert.Nil(t, err)
+			}
 			// assert Write() method called with expected arguments
 			c.client.AssertExpectations(t)
 		})

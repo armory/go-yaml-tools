@@ -97,14 +97,6 @@ func (u UserPassTokenFetcher) fetchToken(client VaultClient) (string, error) {
 	return secret.Auth.ClientToken, nil
 }
 
-func handleLoginErrors(err error) (string, error) {
-	if _, ok := err.(*json.SyntaxError); ok {
-		// some connection errors aren't properly caught, and the vault client tries to parse <nil>
-		return "", fmt.Errorf("error fetching secret from vault - check connection to the server")
-	}
-	return "", fmt.Errorf("error logging into vault: %s", err)
-}
-
 type KubernetesServiceAccountTokenFetcher struct {
 	role string
 	path string
@@ -132,6 +124,14 @@ func (k KubernetesServiceAccountTokenFetcher) fetchToken(client VaultClient) (st
 	}
 
 	return secret.Auth.ClientToken, nil
+}
+
+func handleLoginErrors(err error) (string, error) {
+	if _, ok := err.(*json.SyntaxError); ok {
+		// some connection errors aren't properly caught, and the vault client tries to parse <nil>
+		return "", fmt.Errorf("error fetching secret from vault - check connection to the server")
+	}
+	return "", fmt.Errorf("error logging into vault: %s", err)
 }
 
 func (decrypter *VaultDecrypter) setTokenFetcher() error {
