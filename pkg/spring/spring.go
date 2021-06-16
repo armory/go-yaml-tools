@@ -152,8 +152,9 @@ func watchConfigFiles(ctx context.Context, files []string, envMap map[string]str
 				if !ok {
 					return
 				}
-				if event.Op&fsnotify.Write == fsnotify.Write {
-					log.Debugf("file %s modified, rebuilding config", event.Name)
+				shouldRebuild := isAnyType(event, fsnotify.Write, fsnotify.Chmod, fsnotify.Rename)
+				log.Debugf("fs event %s, rebuilding config = %v", event.String(), shouldRebuild)
+				if shouldRebuild {
 					var cfgs []map[interface{}]interface{}
 					for _, f := range files {
 						config, err := loadConfig(f)
@@ -180,6 +181,15 @@ func watchConfigFiles(ctx context.Context, files []string, envMap map[string]str
 		}
 	}
 	<-ctx.Done()
+}
+
+func isAnyType(event fsnotify.Event, _types ...fsnotify.Op) bool {
+	for _, _type := range _types {
+		if event.Op&_type == _type {
+			return true
+		}
+	}
+	return false
 }
 
 // LoadDefault will use the following defaults:
