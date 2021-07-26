@@ -140,47 +140,44 @@ func watchConfigFiles(ctx context.Context, files []string, envMap map[string]str
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.WithError(err).Errorf("unable to watch any file")
+		return
 	}
 	defer watcher.Close()
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				shouldRebuild := isAnyType(event, fsnotify.Write, fsnotify.Chmod, fsnotify.Rename)
-				log.Debugf("fs event %s, rebuilding config = %v", event.String(), shouldRebuild)
-				if shouldRebuild {
-					var cfgs []map[interface{}]interface{}
-					for _, f := range files {
-						config, err := loadConfig(f)
-						if err != nil {
-							log.Errorf("file %s had error %s", f, err.Error())
-						}
-						cfgs = append(cfgs, config)
-					}
-					m, err := yaml.Resolve(cfgs, envMap)
-					updateFn(m, err)
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				log.Println("error:", err)
+	for {
+		for _, f := range files {
+			if err = watcher.Add(f); err != nil {
+				log.WithError(err).Errorf("unable to watch file changes for %s", f)
 			}
 		}
-	}()
-
-	for _, f := range files {
-		if err = watcher.Add(f); err != nil {
-			log.WithError(err).Errorf("unable to watch file changes for %s", f)
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			shouldRebuild := isAnyType(event, fsnotify.Write, fsnotify.Chmod, fsnotify.Rename)
+			log.Debugf("fs event %s, rebuilding config = %v", event.String(), shouldRebuild)
+			if shouldRebuild {
+				var cfgs []map[interface{}]interface{}
+				for _, f := range files {
+					config, err := loadConfig(f)
+					if err != nil {
+						log.Errorf("file %s had error %s", f, err.Error())
+					}
+					cfgs = append(cfgs, config)
+				}
+				m, err := yaml.Resolve(cfgs, envMap)
+				updateFn(m, err)
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			log.Println("error:", err)
 		}
 	}
-	<-ctx.Done()
 }
 
 func isAnyType(event fsnotify.Event, _types ...fsnotify.Op) bool {
