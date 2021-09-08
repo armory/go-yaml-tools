@@ -121,10 +121,10 @@ func LoadProperties(propNames []string, configDir string, envKeyPairs []string) 
 func LoadDefaultDynamic(ctx context.Context, propNames []string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, error) {
 	env := springEnv{}
 	env.initialize()
-	return loadDefaultDynamicWithEnv(env, ctx, propNames, updateFn)
+	return LoadDefaultDynamicWithEnv(env, ctx, propNames, updateFn)
 }
 
-func loadDefaultDynamicWithEnv(env springEnv, ctx context.Context, propNames []string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, error) {
+func LoadDefaultDynamicWithEnv(env springEnv, ctx context.Context, propNames []string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, error) {
 	if env.configDir == "" {
 		return nil, errors.New("could not find config directory")
 	}
@@ -206,10 +206,10 @@ func isAnyType(event fsnotify.Event, _types ...fsnotify.Op) bool {
 func LoadDefault(propNames []string) (map[string]interface{}, error) {
 	env := springEnv{}
 	env.initialize()
-	return loadDefaultWithEnv(env, propNames)
+	return LoadDefaultWithEnv(env, propNames)
 }
 
-func loadDefaultWithEnv(env springEnv, propNames []string) (map[string]interface{}, error) {
+func LoadDefaultWithEnv(env springEnv, propNames []string) (map[string]interface{}, error) {
 	if env.configDir == "" {
 		return nil, errors.New("could not find config directory")
 	}

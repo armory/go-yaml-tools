@@ -44,7 +44,7 @@ func Resolve(ymlTemplates []map[interface{}]interface{}, envKeyPairs map[string]
 	return stringMap, nil
 }
 
-func extractVaultConfig(m map[interface{}]interface{})  *secrets.VaultConfig {
+func extractVaultConfig(m map[interface{}]interface{}) *secrets.VaultConfig {
 	if secretsMap, ok := m["secrets"].(map[interface{}]interface{}); ok {
 		if vaultmap, ok := secretsMap["vault"].(map[interface{}]interface{}); ok {
 			cfg, err := secrets.DecodeVaultConfig(vaultmap)
@@ -101,7 +101,7 @@ func subValues(fullMap map[string]interface{}, subMap map[string]interface{}, en
 			case []interface{}:
 				sliceMap := make(map[string]interface{})
 				for i := 0; i < len(value.([]interface{})); i++ {
-					sliceMap[string(i)] = value.([]interface{})[i]
+					sliceMap[fmt.Sprint(i)] = value.([]interface{})[i]
 				}
 				err := subValues(fullMap, sliceMap, env)
 				if err != nil {

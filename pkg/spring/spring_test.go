@@ -124,7 +124,7 @@ func TestWatch(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.TODO())
 	env := springEnv{configDir: dir}
-	c, err := loadDefaultDynamicWithEnv(env, ctx, []string{"gate"}, func(cfg map[string]interface{}, err error) {
+	c, err := LoadDefaultDynamicWithEnv(env, ctx, []string{"gate"}, func(cfg map[string]interface{}, err error) {
 		if ctx.Err() != nil {
 			return
 		}
@@ -171,7 +171,7 @@ func TestWatchParseError(t *testing.T) {
 	logrus.SetOutput(io.MultiWriter(os.Stderr, &buf))
 
 	ctx, cancel := context.WithCancel(context.TODO())
-	c, err := loadDefaultDynamicWithEnv(env, ctx, propNames, func(cfg map[string]interface{}, err error) {
+	c, err := LoadDefaultDynamicWithEnv(env, ctx, propNames, func(cfg map[string]interface{}, err error) {
 		if ctx.Err() != nil {
 			return
 		}
@@ -217,7 +217,7 @@ func TestWatchSymLink(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.TODO())
 	env := springEnv{configDir: dir}
-	c, err := loadDefaultDynamicWithEnv(env, ctx, []string{"gate"}, func(cfg map[string]interface{}, err error) {
+	c, err := LoadDefaultDynamicWithEnv(env, ctx, []string{"gate"}, func(cfg map[string]interface{}, err error) {
 		if ctx.Err() != nil {
 			return
 		}
@@ -328,4 +328,16 @@ kubernetes:
 	if !assert.Contains(t, err.Error(), expectedMessage) {
 		return
 	}
+}
+
+func TestMissingConfigDir(t *testing.T) {
+	env := springEnv{}
+	_, err := LoadDefaultDynamicWithEnv(env, context.TODO(), []string{"spinnaker"}, func(m map[string]interface{}, err error) {})
+	assert.Error(t, err)
+}
+
+func TestEnvProfiles(t *testing.T) {
+	_ = os.Setenv("SPRING_PROFILES_ACTIVE", "profile-1,profile-2")
+	env := springEnv{}
+	assert.ElementsMatchf(t, []string{"profile-1", "profile-2"}, env.profiles(), "")
 }
