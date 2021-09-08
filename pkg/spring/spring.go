@@ -206,10 +206,10 @@ func isAnyType(event fsnotify.Event, _types ...fsnotify.Op) bool {
 func LoadDefault(propNames []string) (map[string]interface{}, error) {
 	env := springEnv{}
 	env.initialize()
-	return loadDefaultWithEnv(env, propNames)
+	return LoadDefaultWithEnv(env, propNames)
 }
 
-func loadDefaultWithEnv(env springEnv, propNames []string) (map[string]interface{}, error) {
+func LoadDefaultWithEnv(env springEnv, propNames []string) (map[string]interface{}, error) {
 	if env.configDir == "" {
 		return nil, errors.New("could not find config directory")
 	}

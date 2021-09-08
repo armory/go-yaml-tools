@@ -329,3 +329,15 @@ kubernetes:
 		return
 	}
 }
+
+func TestMissingConfigDir(t *testing.T) {
+	env := springEnv{}
+	_, err := LoadDefaultDynamicWithEnv(env, context.TODO(), []string{"spinnaker"}, func(m map[string]interface{}, err error) {})
+	assert.Error(t, err)
+}
+
+func TestEnvProfiles(t *testing.T) {
+	_ = os.Setenv("SPRING_PROFILES_ACTIVE", "profile-1,profile-2")
+	env := springEnv{}
+	assert.ElementsMatchf(t, []string{"profile-1", "profile-2"}, env.profiles(), "")
+}
