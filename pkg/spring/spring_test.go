@@ -102,9 +102,9 @@ services:
 }
 
 func TestConfigDirs(t *testing.T) {
-	env := springEnv{}
+	env := SpringEnv{}
 	env.initialize()
-	assert.Equal(t, len(env.defaultConfigDirs), 4)
+	assert.Equal(t, len(env.DefaultConfigDirs), 4)
 }
 
 func TestWatch(t *testing.T) {
@@ -123,7 +123,7 @@ func TestWatch(t *testing.T) {
 	assert.Nil(t, ioutil.WriteFile(file2, []byte("foo: baz"), 0644))
 
 	ctx, cancel := context.WithCancel(context.TODO())
-	env := springEnv{configDir: dir}
+	env := SpringEnv{ConfigDir: dir}
 	c, err := LoadDefaultDynamicWithEnv(env, ctx, []string{"gate"}, func(cfg map[string]interface{}, err error) {
 		if ctx.Err() != nil {
 			return
@@ -159,7 +159,7 @@ func TestWatchParseError(t *testing.T) {
 
 	defer os.RemoveAll(dir)
 
-	env := springEnv{configDir: dir}
+	env := SpringEnv{ConfigDir: dir}
 	propNames := []string{"kubesvc"}
 	file3 := dir + "/kubesvc.yml"
 
@@ -216,7 +216,7 @@ func TestWatchSymLink(t *testing.T) {
 	os.Symlink(file, newFile)
 
 	ctx, cancel := context.WithCancel(context.TODO())
-	env := springEnv{configDir: dir}
+	env := SpringEnv{ConfigDir: dir}
 	c, err := LoadDefaultDynamicWithEnv(env, ctx, []string{"gate"}, func(cfg map[string]interface{}, err error) {
 		if ctx.Err() != nil {
 			return
@@ -331,13 +331,13 @@ kubernetes:
 }
 
 func TestMissingConfigDir(t *testing.T) {
-	env := springEnv{}
+	env := SpringEnv{}
 	_, err := LoadDefaultDynamicWithEnv(env, context.TODO(), []string{"spinnaker"}, func(m map[string]interface{}, err error) {})
 	assert.Error(t, err)
 }
 
 func TestEnvProfiles(t *testing.T) {
 	_ = os.Setenv("SPRING_PROFILES_ACTIVE", "profile-1,profile-2")
-	env := springEnv{}
+	env := SpringEnv{}
 	assert.ElementsMatchf(t, []string{"profile-1", "profile-2"}, env.profiles(), "")
 }
