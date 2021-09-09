@@ -16,21 +16,21 @@ import (
 	"github.com/armory/go-yaml-tools/pkg/yaml"
 )
 
-type springEnv struct {
-	defaultConfigDirs []string
-	defaultProfiles   []string
-	configDir         string
-	envMap            map[string]string
+type SpringEnv struct {
+	DefaultConfigDirs []string
+	DefaultProfiles   []string
+	ConfigDir         string
+	EnvMap            map[string]string
 }
 
-func (s *springEnv) initialize() {
+func (s *SpringEnv) initialize() {
 	s.buildConfigDirs()
-	s.defaultProfiles = []string{"armory", "local"}
-	s.configDir = s.configDirectory()
-	s.envMap = keyPairToMap(os.Environ())
+	s.DefaultProfiles = []string{"armory", "local"}
+	s.ConfigDir = s.configDirectory()
+	s.EnvMap = keyPairToMap(os.Environ())
 }
 
-func (s *springEnv) buildConfigDirs() {
+func (s *SpringEnv) buildConfigDirs() {
 	paths := []string{
 		// The order matters.
 		"/home/spinnaker/config",
@@ -41,11 +41,11 @@ func (s *springEnv) buildConfigDirs() {
 	if err == nil {
 		paths = append(paths, filepath.Join(usr.HomeDir, ".spinnaker"))
 	}
-	s.defaultConfigDirs = paths
+	s.DefaultConfigDirs = paths
 }
 
-func (s *springEnv) configDirectory() string {
-	for _, dir := range s.defaultConfigDirs {
+func (s *SpringEnv) configDirectory() string {
+	for _, dir := range s.DefaultConfigDirs {
 		if _, err := fs.Stat(dir); err == nil {
 			return dir
 		}
@@ -53,12 +53,12 @@ func (s *springEnv) configDirectory() string {
 	return ""
 }
 
-func (s *springEnv) profiles() []string {
+func (s *SpringEnv) profiles() []string {
 	p := os.Getenv("SPRING_PROFILES_ACTIVE")
 	if len(p) > 0 {
 		return strings.Split(p, ",")
 	}
-	return s.defaultProfiles
+	return s.DefaultProfiles
 }
 
 // Use afero to create an abstraction layer between our package and the
@@ -119,19 +119,19 @@ func LoadProperties(propNames []string, configDir string, envKeyPairs []string) 
 // be tracked if they contain something. e.g. you cannot dynamically add a profile.
 // Environment variables are frozen on the initial run. This is by design
 func LoadDefaultDynamic(ctx context.Context, propNames []string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, error) {
-	env := springEnv{}
+	env := SpringEnv{}
 	env.initialize()
 	return LoadDefaultDynamicWithEnv(env, ctx, propNames, updateFn)
 }
 
-func LoadDefaultDynamicWithEnv(env springEnv, ctx context.Context, propNames []string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, error) {
-	if env.configDir == "" {
+func LoadDefaultDynamicWithEnv(env SpringEnv, ctx context.Context, propNames []string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, error) {
+	if env.ConfigDir == "" {
 		return nil, errors.New("could not find config directory")
 	}
 
-	config, files, err := loadProperties(propNames, env.configDir, env.profiles(), env.envMap)
+	config, files, err := loadProperties(propNames, env.ConfigDir, env.profiles(), env.EnvMap)
 	if len(files) > 0 {
-		go watchConfigFiles(ctx, files, env.envMap, updateFn)
+		go watchConfigFiles(ctx, files, env.EnvMap, updateFn)
 	}
 	return config, err
 }
@@ -204,16 +204,16 @@ func isAnyType(event fsnotify.Event, _types ...fsnotify.Op) bool {
 //
 // Specify propNames in the same way as LoadProperties().
 func LoadDefault(propNames []string) (map[string]interface{}, error) {
-	env := springEnv{}
+	env := SpringEnv{}
 	env.initialize()
 	return LoadDefaultWithEnv(env, propNames)
 }
 
-func LoadDefaultWithEnv(env springEnv, propNames []string) (map[string]interface{}, error) {
-	if env.configDir == "" {
+func LoadDefaultWithEnv(env SpringEnv, propNames []string) (map[string]interface{}, error) {
+	if env.ConfigDir == "" {
 		return nil, errors.New("could not find config directory")
 	}
-	config, _, err := loadProperties(propNames, env.configDir, env.profiles(), env.envMap)
+	config, _, err := loadProperties(propNames, env.ConfigDir, env.profiles(), env.EnvMap)
 	return config, err
 }
 
