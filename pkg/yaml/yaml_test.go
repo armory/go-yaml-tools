@@ -112,6 +112,19 @@ func TestResolver(t *testing.T) {
 	//empty url
 	project := google["primaryCredentials"].(map[string]interface{})["project"]
 	assert.Equal(t, "", project)
+
+	//interface array basic types
+	aa := services["agent"].(map[string]interface{})
+	ak := aa["kubernetes"].(map[string]interface{})
+	aas := ak["accounts"].([]interface{})
+	aap := aas[0].(map[string]interface{})["permissions"].(map[string]interface{})
+	arp := aap["READ"].([]interface{})
+	assert.Equal(t, "123", arp[0])
+	assert.Equal(t, "45.6", arp[1])
+	assert.Equal(t, "false", arp[2])
+	assert.Equal(t, "true", arp[3])
+	assert.Equal(t, "develop", arp[4])
+
 }
 
 func TestResolverCollections(t *testing.T) {
