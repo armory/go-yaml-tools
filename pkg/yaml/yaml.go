@@ -71,7 +71,7 @@ func convertToStringMap(m map[interface{}]interface{}) map[string]interface{} {
 				switch vv.(type) {
 				case map[interface{}]interface{}:
 					collection = append(collection, convertToStringMap(vv.(map[interface{}]interface{})))
-				case string:
+				case string, int, bool, float64:
 					collection = append(collection, fmt.Sprintf("%v", vv))
 				}
 			}
