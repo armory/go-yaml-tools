@@ -6,6 +6,17 @@ services:
   clouddriver:
     host: ${DEFAULT_DNS_NAME:clouddriver}
 
+  agent:
+    kubernetes:
+      accounts:
+        - permissions:
+            READ:
+              - 123
+              - 45.6
+              - false
+              - true
+              - develop
+
   echo:
     host: ${DEFAULT_DNS_NAME:echo}
     slackApiKey: encrypted:noop!mynotsosecretstring
