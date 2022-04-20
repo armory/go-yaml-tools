@@ -19,6 +19,7 @@ var Engines = map[string]func(context.Context, bool, string) (Decrypter, error){
 	"noop":            NewNoopDecrypter,
 	"s3":              NewS3Decrypter,
 	"secrets-manager": NewAwsSecretsManagerDecrypter,
+	"k8s":             NewKubernetesSecretDecrypter,
 }
 
 type Decrypter interface {
