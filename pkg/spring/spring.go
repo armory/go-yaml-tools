@@ -36,10 +36,12 @@ func (s *SpringEnv) buildConfigDirs() {
 		"/home/spinnaker/config",
 		"/opt/spinnaker/config",
 		"/root/config",
+		"/opt/go-application/config",
 	}
 	usr, err := user.Current()
 	if err == nil {
 		paths = append(paths, filepath.Join(usr.HomeDir, ".spinnaker"))
+		paths = append(paths, filepath.Join(usr.HomeDir, ".armory"))
 	}
 	s.DefaultConfigDirs = paths
 }
@@ -55,6 +57,10 @@ func (s *SpringEnv) configDirectory() string {
 
 func (s *SpringEnv) profiles() []string {
 	p := os.Getenv("SPRING_PROFILES_ACTIVE")
+	if len(p) > 0 {
+		return strings.Split(p, ",")
+	}
+	p = os.Getenv("PROFILES_ACTIVE")
 	if len(p) > 0 {
 		return strings.Split(p, ",")
 	}
