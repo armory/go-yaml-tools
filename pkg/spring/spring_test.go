@@ -104,7 +104,7 @@ services:
 func TestConfigDirs(t *testing.T) {
 	env := SpringEnv{}
 	env.initialize()
-	assert.Equal(t, len(env.DefaultConfigDirs), 4)
+	assert.Equal(t, len(env.DefaultConfigDirs), 6)
 }
 
 func TestWatch(t *testing.T) {
