@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/armory/go-yaml-tools/pkg/secrets"
@@ -12,13 +13,17 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-//Resolve takes an array of yaml maps and returns a single map of a merged
-//properties.  The order of `ymlTemplates` matters, it should go from lowest
-//to highest precendence.
-func Resolve(ymlTemplates []map[interface{}]interface{}, envKeyPairs map[string]string) (map[string]interface{}, error) {
+type ObjectMap = map[interface{}]interface{}
+type StringMap = map[string]string
+type OutputMap = map[string]interface{}
+
+// Resolve takes an array of yaml maps and returns a single map of a merged
+// properties.  The order of `ymlTemplates` matters, it should go from lowest
+// to highest precendence.
+func Resolve(ymlTemplates []ObjectMap, envKeyPairs StringMap) (OutputMap, error) {
 	log.Debugf("Using environ %+v\n", envKeyPairs)
 
-	mergedMap := map[interface{}]interface{}{}
+	mergedMap := ObjectMap{}
 	for _, yml := range ymlTemplates {
 		if err := mergo.Merge(&mergedMap, yml, mergo.WithOverride); err != nil {
 			log.Error(err)
@@ -26,8 +31,8 @@ func Resolve(ymlTemplates []map[interface{}]interface{}, envKeyPairs map[string]
 	}
 
 	// unlike other secret engines, the vault config needs to be registered before it can decrypt anything
-	vaultCfg := extractVaultConfig(mergedMap)
-	if vaultCfg != nil && (secrets.VaultConfig{}) != *vaultCfg {
+	vaultCfg, err := extractVaultConfig(mergedMap)
+	if err == nil {
 		if err := secrets.RegisterVaultConfig(*vaultCfg); err != nil {
 			log.Errorf("Error registering vault config: %v", err)
 		}
@@ -35,98 +40,165 @@ func Resolve(ymlTemplates []map[interface{}]interface{}, envKeyPairs map[string]
 
 	stringMap := convertToStringMap(mergedMap)
 
-	err := subValues(stringMap, stringMap, envKeyPairs)
-
-	if err != nil {
+	if err := subValues(stringMap, stringMap, envKeyPairs); err != nil {
 		return nil, err
 	}
 
 	return stringMap, nil
 }
 
-func extractVaultConfig(m map[interface{}]interface{}) *secrets.VaultConfig {
-	if secretsMap, ok := m["secrets"].(map[interface{}]interface{}); ok {
-		if vaultmap, ok := secretsMap["vault"].(map[interface{}]interface{}); ok {
-			cfg, err := secrets.DecodeVaultConfig(vaultmap)
-			if err != nil {
-				log.Errorf("Error decoding vault config: %v", err)
-				return nil
-			}
-			return cfg
-		}
+func extractVaultConfig(m ObjectMap) (*secrets.VaultConfig, error) {
+	secretsMap, ok := m["secrets"].(ObjectMap)
+	if !ok {
+		return nil, fmt.Errorf("missing secrets.vault key")
 	}
-	return nil
+	vaultmap, ok := secretsMap["vault"].(ObjectMap)
+	if !ok {
+		return nil, fmt.Errorf("missing secrets.vault key")
+	}
+	cfg, err := secrets.DecodeVaultConfig(vaultmap)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding vault config: %w", err)
+	}
+	if cfg != nil && (secrets.VaultConfig{}) != *cfg {
+		return nil, fmt.Errorf("empty decoded vault config")
+	}
+	return cfg, nil
 }
 
-func convertToStringMap(m map[interface{}]interface{}) map[string]interface{} {
-	newMap := map[string]interface{}{}
+func convertToStringMap(m ObjectMap) OutputMap {
+	newMap := OutputMap{}
+	var kstring string
 	for k, v := range m {
-		switch v.(type) {
-		case map[interface{}]interface{}:
-			stringMap := convertToStringMap(v.(map[interface{}]interface{}))
-			newMap[k.(string)] = stringMap
+		kstring = k.(string)
+		switch v := v.(type) {
+		case ObjectMap:
+			newMap[kstring] = convertToStringMap(v)
 		case []interface{}:
-			var collection []interface{}
-			for _, vv := range v.([]interface{}) {
-				switch vv.(type) {
-				case map[interface{}]interface{}:
-					collection = append(collection, convertToStringMap(vv.(map[interface{}]interface{})))
-				case string, int, bool, float64:
-					collection = append(collection, fmt.Sprintf("%v", vv))
+			for i, vv := range v {
+				switch vv := vv.(type) {
+				case ObjectMap:
+					v[i] = convertToStringMap(vv)
+				case string:
+					v[i] = vv
+				case int:
+					v[i] = strconv.Itoa(vv)
+				case bool:
+					v[i] = strconv.FormatBool(vv)
+				case float64:
+					v[i] = strconv.FormatFloat(vv, 'g', -1, 64)
+				case float32:
+					v[i] = strconv.FormatFloat(float64(vv), 'g', -1, 64)
 				}
 			}
-			newMap[k.(string)] = collection
-
+			newMap[kstring] = v
+		case string:
+			newMap[kstring] = v
+		case int:
+			newMap[kstring] = strconv.Itoa(v)
+		case bool:
+			newMap[kstring] = strconv.FormatBool(v)
+		case float64:
+			newMap[kstring] = strconv.FormatFloat(v, 'g', -1, 64)
+		case float32:
+			newMap[kstring] = strconv.FormatFloat(float64(v), 'g', -1, 64)
+		case fmt.Stringer:
+			newMap[kstring] = v.String()
 		default:
-			newMap[k.(string)] = fmt.Sprintf("%v", v)
+			newMap[kstring] = fmt.Sprintf("%v", v)
 		}
 	}
 	return newMap
 }
 
-func subValues(fullMap map[string]interface{}, subMap map[string]interface{}, env map[string]string) error {
+var re = regexp.MustCompile("\\$\\{(.*?)}")
+
+func subValues(fullMap OutputMap, subMap OutputMap, env StringMap) error {
 	//responsible for finding all variables that need to be substituted
-	keepResolving := true
 	loops := 0
-	re := regexp.MustCompile("\\$\\{(.*?)\\}")
-	for keepResolving && loops < len(subMap) {
+	for loops < len(subMap) {
 		loops++
 		for k, value := range subMap {
-			switch value.(type) {
-			case map[string]interface{}:
-				err := subValues(fullMap, value.(map[string]interface{}), env)
-				if err != nil {
-					return err
-				}
-			case []interface{}:
-				sliceMap := make(map[string]interface{})
-				for i := 0; i < len(value.([]interface{})); i++ {
-					sliceMap[fmt.Sprint(i)] = value.([]interface{})[i]
-				}
-				err := subValues(fullMap, sliceMap, env)
-				if err != nil {
-					return err
-				}
-			case string:
-				valStr := value.(string)
-
-				secret, wasSecret, err := resolveSecret(valStr)
-				if err != nil {
-					return err
-				}
-
-				if wasSecret {
-					subMap[k] = secret
-					continue
-				}
-
-				keys := re.FindAllStringSubmatch(valStr, -1)
-				for _, keyToSub := range keys {
-					resolvedValue := resolveSubs(fullMap, keyToSub[1], env)
-					subMap[k] = strings.Replace(valStr, "${"+keyToSub[1]+"}", resolvedValue, -1)
-				}
+			if err := processOneSubvalue(fullMap, subMap, env, value, k); err != nil {
+				return err
 			}
 		}
+	}
+	return nil
+}
+
+func processOneSubvalue(fullMap OutputMap, subMap OutputMap, env StringMap, value interface{}, k string) error {
+	var secret string
+	var decrypter secrets.Decrypter
+	var valueBytes []byte
+	switch value := value.(type) {
+	case map[string]interface{}:
+		err := subValues(fullMap, value, env)
+		if err != nil {
+			return err
+		}
+	case []interface{}:
+		for i := 0; i < len(value); i++ {
+			err := processOneSubvalueFromArray(fullMap, value[:], env, value[i], i)
+			if err != nil {
+				return err
+			}
+		}
+	case string:
+		if secrets.IsEncryptedSecret(value) {
+			var err error
+			if decrypter, err = secrets.NewDecrypter(context.TODO(), value); err != nil {
+				return err
+			} else if secret, err = decrypter.Decrypt(); err != nil {
+				return err
+			}
+			subMap[k] = secret
+			return nil
+		}
+
+		valueBytes = []byte(value)
+		re.ReplaceAllFunc(valueBytes, func(key []byte) []byte {
+			i := len(key) - 1
+			myKey := string(key[2:i])
+			return []byte(resolveSubs(fullMap, myKey, env))
+		})
+	}
+	return nil
+}
+
+func processOneSubvalueFromArray(fullMap OutputMap, subslice []interface{}, env StringMap, value interface{}, k int) error {
+	var secret string
+	var decrypter secrets.Decrypter
+	switch value := value.(type) {
+	case map[string]interface{}:
+		err := subValues(fullMap, value, env)
+		if err != nil {
+			return err
+		}
+	case []interface{}:
+		for i := 0; i < len(value); i++ {
+			err := processOneSubvalueFromArray(fullMap, value[:], env, value[i], i)
+			if err != nil {
+				return err
+			}
+		}
+	case string:
+		if secrets.IsEncryptedSecret(value) {
+			var err error
+			if decrypter, err = secrets.NewDecrypter(context.TODO(), value); err != nil {
+				return err
+			} else if secret, err = decrypter.Decrypt(); err != nil {
+				return err
+			}
+			subslice[k] = secret
+			return nil
+		}
+
+		re.ReplaceAllFunc([]byte(value), func(key []byte) []byte {
+			i := len(key) - 1
+			myKey := string(key[2:i])
+			return []byte(resolveSubs(fullMap, myKey, env))
+		})
 	}
 	return nil
 }
@@ -159,7 +231,7 @@ func resolveSubs(m map[string]interface{}, keyToSub string, env map[string]strin
 		defaultKey = keyDefaultSplit[1]
 	}
 
-	if v := valueFromFlatKey(subKey, m); v != "" {
+	if v, err := valueFromFlatKey(subKey, m); err == nil {
 		defaultKey = v
 	} else if v, ok := env[subKey]; ok {
 		defaultKey = v
@@ -168,17 +240,28 @@ func resolveSubs(m map[string]interface{}, keyToSub string, env map[string]strin
 	return defaultKey
 }
 
-func valueFromFlatKey(flatKey string, m map[string]interface{}) string {
-	keys := strings.Split(flatKey, ".")
-	for _, key := range keys {
-		switch m[key].(type) {
-		case map[string]interface{}:
-			m = m[key].(map[string]interface{})
-		case string:
-			return m[key].(string)
-		default:
-			continue
+func valueFromFlatKey(flatKey string, root map[string]interface{}) (string, error) {
+	fields := strings.Split(flatKey, ".")
+	var val interface{} = root
+	var m OutputMap
+	var ok bool
+	for i := range fields {
+		if val == nil {
+			return "", fmt.Errorf("not found")
+		}
+		if m, ok = val.(OutputMap); !ok {
+			return "", fmt.Errorf("%v is of the type %T: expected map[string]interface{}", flatKey, val)
+		}
+		if val, ok = m[fields[i]]; !ok {
+			return "", fmt.Errorf("not found")
 		}
 	}
-	return ""
+	switch v := val.(type) {
+	case string:
+		return v, nil
+	case fmt.Stringer:
+		return v.String(), nil
+	default:
+		return "", fmt.Errorf("not a string")
+	}
 }
