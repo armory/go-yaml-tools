@@ -60,7 +60,10 @@ func extractVaultConfig(m ObjectMap) (*secrets.VaultConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error decoding vault config: %w", err)
 	}
-	if cfg != nil && (secrets.VaultConfig{}) != *cfg {
+	if cfg == nil {
+		return nil, fmt.Errorf("empty decoded vault config")
+	}
+	if *cfg == (secrets.VaultConfig{}) {
 		return nil, fmt.Errorf("empty decoded vault config")
 	}
 	return cfg, nil
@@ -71,44 +74,61 @@ func convertToStringMap(m ObjectMap) OutputMap {
 	var kstring string
 	for k, v := range m {
 		kstring = k.(string)
-		switch v := v.(type) {
-		case ObjectMap:
-			newMap[kstring] = convertToStringMap(v)
-		case []interface{}:
-			for i, vv := range v {
-				switch vv := vv.(type) {
-				case ObjectMap:
-					v[i] = convertToStringMap(vv)
-				case string:
-					v[i] = vv
-				case int:
-					v[i] = strconv.Itoa(vv)
-				case bool:
-					v[i] = strconv.FormatBool(vv)
-				case float64:
-					v[i] = strconv.FormatFloat(vv, 'g', -1, 64)
-				case float32:
-					v[i] = strconv.FormatFloat(float64(vv), 'g', -1, 64)
-				}
-			}
-			newMap[kstring] = v
-		case string:
-			newMap[kstring] = v
-		case int:
-			newMap[kstring] = strconv.Itoa(v)
-		case bool:
-			newMap[kstring] = strconv.FormatBool(v)
-		case float64:
-			newMap[kstring] = strconv.FormatFloat(v, 'g', -1, 64)
-		case float32:
-			newMap[kstring] = strconv.FormatFloat(float64(v), 'g', -1, 64)
-		case fmt.Stringer:
-			newMap[kstring] = v.String()
-		default:
-			newMap[kstring] = fmt.Sprintf("%v", v)
-		}
+		convertOneValueToStringMap(v, newMap, kstring)
 	}
 	return newMap
+}
+
+func convertOneValueToStringMap(v interface{}, newMap OutputMap, kstring string) {
+	switch v := v.(type) {
+	case ObjectMap:
+		newMap[kstring] = convertToStringMap(v)
+	case []interface{}:
+		for i := range v {
+			converOneArrayToStringMap(v[:], i)
+		}
+		newMap[kstring] = v
+	case string:
+		newMap[kstring] = v
+	case int:
+		newMap[kstring] = strconv.Itoa(v)
+	case bool:
+		newMap[kstring] = strconv.FormatBool(v)
+	case float64:
+		newMap[kstring] = strconv.FormatFloat(v, 'g', -1, 64)
+	case float32:
+		newMap[kstring] = strconv.FormatFloat(float64(v), 'g', -1, 64)
+	case fmt.Stringer:
+		newMap[kstring] = v.String()
+	default:
+		newMap[kstring] = fmt.Sprintf("%v", v)
+	}
+}
+
+func converOneArrayToStringMap(v []interface{}, i int) {
+	switch vv := v[i].(type) {
+	case ObjectMap:
+		v[i] = convertToStringMap(vv)
+	case []interface{}:
+		for j := range v {
+			converOneArrayToStringMap(vv[:], j)
+		}
+		v[i] = vv
+	case string:
+		v[i] = vv
+	case int:
+		v[i] = strconv.Itoa(vv)
+	case bool:
+		v[i] = strconv.FormatBool(vv)
+	case float64:
+		v[i] = strconv.FormatFloat(vv, 'g', -1, 64)
+	case float32:
+		v[i] = strconv.FormatFloat(float64(vv), 'g', -1, 64)
+	case fmt.Stringer:
+		v[i] = vv.String()
+	default:
+		v[i] = fmt.Sprintf("%v", vv)
+	}
 }
 
 var re = regexp.MustCompile("\\$\\{(.*?)}")
