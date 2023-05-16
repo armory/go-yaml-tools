@@ -3,7 +3,7 @@ package yaml
 import (
 	"fmt"
 	"github.com/armory/go-yaml-tools/pkg/secrets"
-	"io"
+	"io/ioutil"
 	"os"
 	"testing"
 
@@ -85,7 +85,7 @@ func readTestFixtures(t *testing.T, fileName string) map[interface{}]interface{}
 	spinnakerYml := fmt.Sprintf("%s/../../test/%s", wd, fileName)
 	f, err := os.Open(spinnakerYml)
 	check(t, err)
-	s, err := io.ReadAll(f)
+	s, err := ioutil.ReadAll(f)
 	check(t, err)
 
 	any_ := map[interface{}]interface{}{}
