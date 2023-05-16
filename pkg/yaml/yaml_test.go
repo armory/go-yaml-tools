@@ -1,6 +1,7 @@
 package yaml
 
 import (
+	"errors"
 	"fmt"
 	"github.com/armory/go-yaml-tools/pkg/secrets"
 	"io/ioutil"
@@ -56,7 +57,28 @@ func TestSubValues(t *testing.T) {
 				return m["mock"].(map[string]interface{})["array"].([]interface{})[0].(string)
 			},
 			expectedValue: "mockReplaceValue",
-		}}
+		},
+		{
+			m: map[string]interface{}{
+				"mock": map[string]interface{}{
+					"array": []interface{}{
+						[]interface{}{
+							"${mock.flat.otherkey.value}",
+						},
+					},
+					"flat": map[string]interface{}{
+						"otherkey": map[string]interface{}{
+							"value": "mockReplaceValue",
+						},
+					},
+				},
+			},
+			actual: func(m map[string]interface{}) string {
+				return m["mock"].(map[string]interface{})["array"].([]interface{})[0].([]interface{})[0].(string)
+			},
+			expectedValue: "mockReplaceValue",
+		},
+	}
 
 	for _, test := range tests {
 		err := subValues(test.m, test.m, nil)
@@ -275,6 +297,173 @@ func Test_DecodeVaultConfig(t *testing.T) {
 			config, err := extractVaultConfig(any_)
 			assert.Nil(t, err)
 			assert.EqualValues(t, c.expected, config)
+		})
+	}
+}
+
+func Test_valueFromFlatKey(t *testing.T) {
+	type args struct {
+		flatKey string
+		root    map[string]interface{}
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    string
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "not found",
+			args: args{
+				flatKey: "a.b.c.d",
+				root:    nil,
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if !assert.Error(t, err) {
+					return false
+				}
+				if !assert.True(t, errors.Is(err, VFFKErrorNotFound), "error was %v", err) {
+					return false
+				}
+				return true
+			},
+		},
+		{
+			name: "not found with values",
+			args: args{
+				flatKey: "a.b.c.d",
+				root: OutputMap{
+					"a": nil,
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if !assert.Error(t, err) {
+					return false
+				}
+				if !assert.True(t, errors.Is(err, VFFKErrorNotFound), "error was %v", err) {
+					return false
+				}
+				return true
+			},
+		},
+		{
+			name: "wrong intermediary type",
+			args: args{
+				flatKey: "a.b.c.d",
+				root: OutputMap{
+					"a": []interface{}{
+						65.0,
+					},
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if !assert.Error(t, err) {
+					return false
+				}
+				if !assert.True(t, errors.Is(err, VFFKErrorInvalidIntermediaryType), "error was %q", err) {
+					return false
+				}
+				return true
+			},
+		},
+		{
+			name: "wrong leaf type",
+			args: args{
+				flatKey: "a.b.c.d",
+				root: OutputMap{
+					"a": OutputMap{
+						"b": OutputMap{
+							"c": OutputMap{
+								"d": struct{}{},
+							},
+						},
+					},
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if !assert.Error(t, err) {
+					return false
+				}
+				if !assert.True(t, errors.Is(err, VFFKErrorInvalidLeafType), "error was %q", err) {
+					return false
+				}
+				return true
+			},
+		},
+		{
+			name: "valid leaf type float",
+			args: args{
+				flatKey: "a.b.c.d",
+				root: OutputMap{
+					"a": OutputMap{
+						"b": OutputMap{
+							"c": OutputMap{
+								"d": 6.6,
+							},
+						},
+					},
+				},
+			},
+			want: "6.6",
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if !assert.Nil(t, err) {
+					return false
+				}
+				return true
+			},
+		},
+		{
+			name: "valid leaf type int",
+			args: args{
+				flatKey: "a.b.c.d",
+				root: OutputMap{
+					"a": OutputMap{
+						"b": OutputMap{
+							"c": OutputMap{
+								"d": 6,
+							},
+						},
+					},
+				},
+			},
+			want: "6",
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if !assert.Nil(t, err) {
+					return false
+				}
+				return true
+			},
+		},
+		{
+			name: "valid leaf type bool",
+			args: args{
+				flatKey: "a.b.c.d",
+				root: OutputMap{
+					"a": OutputMap{
+						"b": OutputMap{
+							"c": OutputMap{
+								"d": true,
+							},
+						},
+					},
+				},
+			},
+			want: "true",
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if !assert.Nil(t, err) {
+					return false
+				}
+				return true
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := valueFromFlatKey(tt.args.flatKey, tt.args.root)
+			if !tt.wantErr(t, err, fmt.Sprintf("valueFromFlatKey(%v, %v)", tt.args.flatKey, tt.args.root)) {
+				return
+			}
+			assert.Equalf(t, tt.want, got, "valueFromFlatKey(%v, %v)", tt.args.flatKey, tt.args.root)
 		})
 	}
 }

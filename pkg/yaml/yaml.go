@@ -2,6 +2,7 @@ package yaml
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -248,28 +249,40 @@ func resolveSubs(m map[string]interface{}, keyToSub string, env map[string]strin
 	return defaultKey
 }
 
+var VFFKErrorNotFound = errors.New("not found")
+var VFFKErrorInvalidIntermediaryType = errors.New("expected map[string]interface{}")
+var VFFKErrorInvalidLeafType = errors.New("expected string or stringer()")
+
 func valueFromFlatKey(flatKey string, root map[string]interface{}) (string, error) {
 	fields := strings.Split(flatKey, ".")
-	var val interface{} = root
-	var m OutputMap
+	var currVal interface{} = root
+	var currMap OutputMap // pre-alloc OutputMap ref. Actually assigned & used in loop below
 	var ok bool
 	for i := range fields {
-		if val == nil {
-			return "", fmt.Errorf("not found")
+		if currVal == nil {
+			return "", fmt.Errorf("path %q was %w", flatKey, VFFKErrorNotFound)
 		}
-		if m, ok = val.(OutputMap); !ok {
-			return "", fmt.Errorf("%v is of the type %T: expected map[string]interface{}", flatKey, val)
+		if currMap, ok = currVal.(OutputMap); !ok {
+			return "", fmt.Errorf("path %q was of type %T, %w", strings.Join(fields[:i], "."), currVal, VFFKErrorInvalidIntermediaryType)
 		}
-		if val, ok = m[fields[i]]; !ok {
-			return "", fmt.Errorf("not found")
+		if currVal, ok = currMap[fields[i]]; !ok {
+			return "", fmt.Errorf("path %q was %w", flatKey, VFFKErrorNotFound)
 		}
 	}
-	switch v := val.(type) {
+	switch v := currVal.(type) {
 	case string:
 		return v, nil
 	case fmt.Stringer:
 		return v.String(), nil
+	case float32:
+		return strconv.FormatFloat(float64(v), 'g', -1, 64), nil
+	case float64:
+		return strconv.FormatFloat(v, 'g', -1, 64), nil
+	case int:
+		return strconv.Itoa(v), nil
+	case bool:
+		return strconv.FormatBool(v), nil
 	default:
-		return "", fmt.Errorf("not a string")
+		return "", fmt.Errorf("path %q is type %T, %w", flatKey, v, VFFKErrorInvalidLeafType)
 	}
 }
