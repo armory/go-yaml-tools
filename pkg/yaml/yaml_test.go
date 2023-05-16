@@ -467,3 +467,155 @@ func Test_valueFromFlatKey(t *testing.T) {
 		})
 	}
 }
+
+func Test_extractVaultConfig(t *testing.T) {
+	type args struct {
+		m ObjectMap
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    *secrets.VaultConfig
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "missing vault key",
+			args: args{
+				m: ObjectMap{
+					"secrets": ObjectMap{},
+				},
+			},
+			want: nil,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if !assert.Error(t, err) {
+					return false
+				}
+				if !assert.True(t, errors.Is(err, EVCErrorMissingKey), "actual error was: %v", err) {
+					return false
+				}
+				return true
+			},
+		},
+		{
+			name: "missing vault key",
+			args: args{
+				m: ObjectMap{},
+			},
+			want: nil,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if !assert.Error(t, err) {
+					return false
+				}
+				if !assert.True(t, errors.Is(err, EVCErrorMissingKey), "actual error was: %v", err) {
+					return false
+				}
+				return true
+			},
+		},
+		{
+			name: "invalid vault value",
+			args: args{
+				m: ObjectMap{
+					"secrets": ObjectMap{
+						"vault": ObjectMap{
+							"enabled": "_invalid_",
+						},
+					},
+				},
+			},
+			want: nil,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if !assert.Error(t, err) {
+					return false
+				}
+				if !assert.True(t, errors.Is(err, EVCErrorDecoding), "actual error was: %v", err) {
+					return false
+				}
+				return true
+			},
+		},
+		{
+			name: "zero vault value",
+			args: args{
+				m: ObjectMap{
+					"secrets": ObjectMap{
+						"vault": ObjectMap{},
+					},
+				},
+			},
+			want: nil,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if !assert.Error(t, err) {
+					return false
+				}
+				if !assert.True(t, errors.Is(err, EVCErrorEmpty), "actual error was: %v", err) {
+					return false
+				}
+				return true
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := extractVaultConfig(tt.args.m)
+			if !tt.wantErr(t, err, fmt.Sprintf("extractVaultConfig(%v)", tt.args.m)) {
+				return
+			}
+			assert.Equalf(t, tt.want, got, "extractVaultConfig(%v)", tt.args.m)
+		})
+	}
+}
+
+func TestResolve(t *testing.T) {
+	type args struct {
+		ymlTemplates []ObjectMap
+		envKeyPairs  StringMap
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    OutputMap
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "disable vault",
+			args: args{
+				ymlTemplates: []ObjectMap{
+					{
+						"secrets": ObjectMap{
+							"vault": ObjectMap{
+								"enabled":  false,
+								"username": "mytest",
+							},
+						},
+					},
+				},
+				envKeyPairs: StringMap{},
+			},
+			want: OutputMap{
+				"secrets": OutputMap{
+					"vault": OutputMap{
+						"enabled":  "false",
+						"username": "mytest",
+					},
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				if !assert.Nil(t, err) {
+					// I wanted to check for the invalid vault config, but it get swallowed /shrug
+					return false
+				}
+				return true
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Resolve(tt.args.ymlTemplates, tt.args.envKeyPairs)
+			if !tt.wantErr(t, err, fmt.Sprintf("Resolve(%v, %v)", tt.args.ymlTemplates, tt.args.envKeyPairs)) {
+				return
+			}
+			assert.Equalf(t, tt.want, got, "Resolve(%v, %v)", tt.args.ymlTemplates, tt.args.envKeyPairs)
+		})
+	}
+}

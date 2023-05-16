@@ -48,24 +48,28 @@ func Resolve(ymlTemplates []ObjectMap, envKeyPairs StringMap) (OutputMap, error)
 	return stringMap, nil
 }
 
+var EVCErrorMissingKey = errors.New("missing secrets.vault key")
+var EVCErrorDecoding = errors.New("error decoding vault config")
+var EVCErrorEmpty = errors.New("empty decoded vault config")
+
 func extractVaultConfig(m ObjectMap) (*secrets.VaultConfig, error) {
 	secretsMap, ok := m["secrets"].(ObjectMap)
 	if !ok {
-		return nil, fmt.Errorf("missing secrets.vault key")
+		return nil, EVCErrorMissingKey
 	}
 	vaultmap, ok := secretsMap["vault"].(ObjectMap)
 	if !ok {
-		return nil, fmt.Errorf("missing secrets.vault key")
+		return nil, EVCErrorMissingKey
 	}
 	cfg, err := secrets.DecodeVaultConfig(vaultmap)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding vault config: %w", err)
+		return nil, fmt.Errorf("%w: %v", EVCErrorDecoding, err)
 	}
 	if cfg == nil {
-		return nil, fmt.Errorf("empty decoded vault config")
+		return nil, EVCErrorEmpty
 	}
 	if *cfg == (secrets.VaultConfig{}) {
-		return nil, fmt.Errorf("empty decoded vault config")
+		return nil, EVCErrorEmpty
 	}
 	return cfg, nil
 }
