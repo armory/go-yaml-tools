@@ -177,11 +177,13 @@ func processOneSubvalue(fullMap OutputMap, subMap OutputMap, env StringMap, valu
 		}
 
 		valueBytes = []byte(value)
-		re.ReplaceAllFunc(valueBytes, func(key []byte) []byte {
+		valueBytes = re.ReplaceAllFunc(valueBytes, func(key []byte) []byte {
 			i := len(key) - 1
 			myKey := string(key[2:i])
 			return []byte(resolveSubs(fullMap, myKey, env))
 		})
+		value = string(valueBytes)
+		subMap[k] = value
 	}
 	return nil
 }
@@ -189,6 +191,7 @@ func processOneSubvalue(fullMap OutputMap, subMap OutputMap, env StringMap, valu
 func processOneSubvalueFromArray(fullMap OutputMap, subslice []interface{}, env StringMap, value interface{}, k int) error {
 	var secret string
 	var decrypter secrets.Decrypter
+	var valueBytes []byte
 	switch value := value.(type) {
 	case map[string]interface{}:
 		err := subValues(fullMap, value, env)
@@ -214,31 +217,16 @@ func processOneSubvalueFromArray(fullMap OutputMap, subslice []interface{}, env 
 			return nil
 		}
 
-		re.ReplaceAllFunc([]byte(value), func(key []byte) []byte {
+		valueBytes = []byte(value)
+		valueBytes = re.ReplaceAllFunc(valueBytes, func(key []byte) []byte {
 			i := len(key) - 1
 			myKey := string(key[2:i])
 			return []byte(resolveSubs(fullMap, myKey, env))
 		})
+		value = string(valueBytes)
+		subslice[k] = value
 	}
 	return nil
-}
-
-func resolveSecret(valStr string) (string, bool, error) {
-	// if the value is a secret resolve it
-	if secrets.IsEncryptedSecret(valStr) {
-		d, err := secrets.NewDecrypter(context.TODO(), valStr)
-		if err != nil {
-			return "", true, err
-		}
-
-		secret, err := d.Decrypt()
-		if err != nil {
-			return "", true, err
-		}
-
-		return secret, true, nil
-	}
-	return valStr, false, nil
 }
 
 func resolveSubs(m map[string]interface{}, keyToSub string, env map[string]string) string {

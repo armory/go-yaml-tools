@@ -3,7 +3,7 @@ package yaml
 import (
 	"fmt"
 	"github.com/armory/go-yaml-tools/pkg/secrets"
-	"io/ioutil"
+	"io"
 	"os"
 	"testing"
 
@@ -18,20 +18,52 @@ func check(t *testing.T, e error) {
 }
 
 func TestSubValues(t *testing.T) {
-	m := map[string]interface{}{
-		"mock": map[string]interface{}{
-			"somekey": "${mock.flat.otherkey.value}",
-			"flat": map[string]interface{}{
-				"otherkey": map[string]interface{}{
-					"value": "mockReplaceValue",
+	tests := []struct {
+		m             map[string]interface{}
+		expectedValue string
+		actual        func(m map[string]interface{}) string
+	}{
+		{
+			m: map[string]interface{}{
+				"mock": map[string]interface{}{
+					"somekey": "${mock.flat.otherkey.value}",
+					"flat": map[string]interface{}{
+						"otherkey": map[string]interface{}{
+							"value": "mockReplaceValue",
+						},
+					},
 				},
 			},
+			actual: func(m map[string]interface{}) string {
+				return m["mock"].(map[string]interface{})["somekey"].(string)
+			},
+			expectedValue: "mockReplaceValue",
 		},
-	}
+		{
+			m: map[string]interface{}{
+				"mock": map[string]interface{}{
+					"array": []interface{}{
+						"${mock.flat.otherkey.value}",
+					},
+					"flat": map[string]interface{}{
+						"otherkey": map[string]interface{}{
+							"value": "mockReplaceValue",
+						},
+					},
+				},
+			},
+			actual: func(m map[string]interface{}) string {
+				return m["mock"].(map[string]interface{})["array"].([]interface{})[0].(string)
+			},
+			expectedValue: "mockReplaceValue",
+		}}
 
-	subValues(m, m, nil)
-	testValue := m["mock"].(map[string]interface{})["somekey"]
-	assert.Equal(t, "mockReplaceValue", testValue)
+	for _, test := range tests {
+		err := subValues(test.m, test.m, nil)
+		assert.Nil(t, err)
+		testValue := test.actual(test.m)
+		assert.Equal(t, test.expectedValue, testValue)
+	}
 }
 
 func TestResolveSubs(t *testing.T) {
@@ -53,14 +85,14 @@ func readTestFixtures(t *testing.T, fileName string) map[interface{}]interface{}
 	spinnakerYml := fmt.Sprintf("%s/../../test/%s", wd, fileName)
 	f, err := os.Open(spinnakerYml)
 	check(t, err)
-	s, err := ioutil.ReadAll(f)
+	s, err := io.ReadAll(f)
 	check(t, err)
 
-	any := map[interface{}]interface{}{}
-	err = yaml.Unmarshal(s, &any)
+	any_ := map[interface{}]interface{}{}
+	err = yaml.Unmarshal(s, &any_)
 	check(t, err)
 
-	return any
+	return any_
 }
 
 func TestResolver(t *testing.T) {
@@ -188,9 +220,10 @@ var disabledYaml = `
         url: https://vault.com
         authMethod: TOKEN
 `
+
 func Test_DecodeVaultConfig(t *testing.T) {
 	cases := map[string]struct {
-		yaml string
+		yaml     string
 		expected *secrets.VaultConfig
 	}{
 		"happy path - userpass auth": {
@@ -207,39 +240,40 @@ func Test_DecodeVaultConfig(t *testing.T) {
 		"happy path - kubernetes auth with namespace": {
 			yaml: kubernetesYaml,
 			expected: &secrets.VaultConfig{
-				Enabled:      true,
-				Url:          "https://vault.com",
-				AuthMethod:   "KUBERNETES",
-				Path: "kubernetes",
-				Role: "my-role",
-				Namespace: "ent-namespace",
+				Enabled:    true,
+				Url:        "https://vault.com",
+				AuthMethod: "KUBERNETES",
+				Path:       "kubernetes",
+				Role:       "my-role",
+				Namespace:  "ent-namespace",
 			},
 		},
 		"happy path - token auth": {
 			yaml: tokenYaml,
 			expected: &secrets.VaultConfig{
-				Enabled:      true,
-				Url:          "https://vault.com",
-				AuthMethod:   "TOKEN",
+				Enabled:    true,
+				Url:        "https://vault.com",
+				AuthMethod: "TOKEN",
 			},
 		},
 		"happy path - disabled": {
 			yaml: disabledYaml,
 			expected: &secrets.VaultConfig{
-				Enabled:      false,
-				Url:          "https://vault.com",
-				AuthMethod:   "TOKEN",
+				Enabled:    false,
+				Url:        "https://vault.com",
+				AuthMethod: "TOKEN",
 			},
 		},
 	}
 	for testName, c := range cases {
 		t.Run(testName, func(t *testing.T) {
 
-			any := map[interface{}]interface{}{}
-			err := yaml.Unmarshal([]byte(c.yaml), &any)
+			any_ := map[interface{}]interface{}{}
+			err := yaml.Unmarshal([]byte(c.yaml), &any_)
 			assert.Nil(t, err)
 
-			config := extractVaultConfig(any)
+			config, err := extractVaultConfig(any_)
+			assert.Nil(t, err)
 			assert.EqualValues(t, c.expected, config)
 		})
 	}
