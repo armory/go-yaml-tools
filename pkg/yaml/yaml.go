@@ -8,13 +8,13 @@ import (
 
 	"github.com/armory/go-yaml-tools/pkg/secrets"
 
-	"github.com/imdario/mergo"
+	"dario.cat/mergo"
 	log "github.com/sirupsen/logrus"
 )
 
-//Resolve takes an array of yaml maps and returns a single map of a merged
-//properties.  The order of `ymlTemplates` matters, it should go from lowest
-//to highest precendence.
+// Resolve takes an array of yaml maps and returns a single map of a merged
+// properties.  The order of `ymlTemplates` matters, it should go from lowest
+// to highest precendence.
 func Resolve(ymlTemplates []map[interface{}]interface{}, envKeyPairs map[string]string) (map[string]interface{}, error) {
 	log.Debugf("Using environ %+v\n", envKeyPairs)
 
