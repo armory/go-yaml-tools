@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/go-bongo/go-dotaccess"
+
 	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
@@ -82,6 +84,17 @@ func loadConfig(configFile string) (map[interface{}]interface{}, error) {
 		if err = yamlParse.Unmarshal(bytes, &s); err != nil {
 			return s, fmt.Errorf("unable to parse config file %s: %w", configFile, err)
 		}
+		importRef, err := dotaccess.Get(s, "spring.config.import")
+		if importRef != nil {
+			importVal := fmt.Sprintf("%v", importRef)
+			log.Info("Found spring import... loading from ", importVal)
+			bytes, err = afero.ReadFile(fs, importVal)
+			err := yamlParse.UnmarshalStrict(bytes, &s)
+			if err != nil {
+				log.Error("Unable to import spring import... ", err)
+				return s, err
+			}
+		}
 		log.Info("Configured with settings from file: ", configFile)
 	} else {
 		logFsStatError(err, "Config file ", configFile, " not present; falling back to default settings")
@@ -97,20 +110,25 @@ func logFsStatError(err error, args ...interface{}) {
 	log.WithError(err).Error(args...)
 }
 
-//LoadProperties tries to do what spring properties manages by loading files
-//using the right precedence and returning a merged map that contains all the
-//keys and their values have been substituted for the correct value
+// LoadProperties tries to do what spring properties manages by loading files
+// using the right precedence and returning a merged map that contains all the
+// keys and their values have been substituted for the correct value
 //
-//Usage:
-//  If you want to load the following files:
-//    - spinnaker.yml/yaml
-//    - spinnaker-local.yml/yaml
-//    - gate-local.yml/yaml
-//    - gate-armory.yml/yaml
+// Usage:
+//
+//	If you want to load the following files:
+//	  - spinnaker.yml/yaml
+//	  - spinnaker-local.yml/yaml
+//	  - gate-local.yml/yaml
+//	  - gate-armory.yml/yaml
+//
 // Then For propNames you would give:
-//	  ["spinnaker", "gate"]
+//
+//	["spinnaker", "gate"]
+//
 // and you'll need to make sure your envKeyPairs has the following key pair as one of it's variables
-//    SPRING_PROFILES_ACTIVE="armory,local"
+//
+//	SPRING_PROFILES_ACTIVE="armory,local"
 func LoadProperties(propNames []string, configDir string, envKeyPairs []string) (map[string]interface{}, error) {
 	envMap := keyPairToMap(envKeyPairs)
 	profStr := envMap["SPRING_PROFILES_ACTIVE"]
@@ -202,11 +220,14 @@ func isAnyType(event fsnotify.Event, _types ...fsnotify.Op) bool {
 //  2. /home/spinnaker/config
 //  3. /root/config
 //  4. HOME_DIR/.spinnaker
+//
 // Profiles:
-//  - armory
-//  - local
+//   - armory
+//   - local
+//
 // Env:
-//  Pulls os.Environ()
+//
+//	Pulls os.Environ()
 //
 // Specify propNames in the same way as LoadProperties().
 func LoadDefault(propNames []string) (map[string]interface{}, error) {
