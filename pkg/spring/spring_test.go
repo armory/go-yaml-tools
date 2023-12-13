@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/go-bongo/go-dotaccess"
 	"github.com/mitchellh/mapstructure"
 	"github.com/sirupsen/logrus"
 	"io"
@@ -330,6 +331,76 @@ kubernetes:
 	}
 }
 
+func TestLoadPropertiesThatHaveImport(t *testing.T) {
+	prevfs := fs
+	defer func() { fs = prevfs }()
+	fs = afero.NewMemMapFs()
+	err := writeFileWithContents("/tmp/kubesvc.yaml", `
+existing: someValue
+spring:
+  config:
+    import:  /tmp/other-config.yaml
+`)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	err = writeFileWithContents("/tmp/other-config.yaml", `
+key: value
+`)
+
+	if !assert.NoError(t, err) {
+		return
+	}
+	// Test
+	config, _, err := loadProperties([]string{"kubesvc"}, "/tmp", []string{}, map[string]string{})
+	configImport, _ := dotaccess.Get(config, "spring.config.import")
+	assert.Equal(t, "/tmp/other-config.yaml", configImport)
+	configImport, _ = dotaccess.Get(config, "key")
+	assert.Equal(t, "value", configImport)
+	configImport, _ = dotaccess.Get(config, "existing")
+	assert.Equal(t, "someValue", configImport)
+}
+
+func TestImportWithConflictingImport(t *testing.T) {
+	prevfs := fs
+	defer func() { fs = prevfs }()
+	fs = afero.NewMemMapFs()
+	err := writeFileWithContents("/tmp/kubesvc.yaml", `
+spring:
+  config:
+    import:  /tmp/other-config.yaml
+conflicting: shouldWork
+`)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	err = writeFileWithContents("/tmp/other-config.yaml", `
+conflicting: shouldFailThisFile
+valueInConflictingFile: someValue
+`)
+
+	if !assert.NoError(t, err) {
+		return
+	}
+	// Test
+	config, _, err := loadProperties([]string{"kubesvc"}, "/tmp", []string{}, map[string]string{})
+	configImport, _ := dotaccess.Get(config, "conflicting")
+	assert.Nil(t, configImport)
+	configImport, _ = dotaccess.Get(config, "spring")
+	assert.Nil(t, configImport)
+}
+func writeFileWithContents(fileName string, content string) error {
+	var err error = nil
+	var file afero.File
+	file, err = fs.Create(fileName)
+	if err != nil {
+		return err
+	}
+	_, err = file.WriteString(content)
+	return err
+}
 func TestMissingConfigDir(t *testing.T) {
 	env := SpringEnv{}
 	_, err := LoadDefaultDynamicWithEnv(env, context.TODO(), []string{"spinnaker"}, func(m map[string]interface{}, err error) {})

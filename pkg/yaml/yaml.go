@@ -10,7 +10,7 @@ import (
 
 	"github.com/armory/go-yaml-tools/pkg/secrets"
 
-	"github.com/imdario/mergo"
+	"dario.cat/mergo"
 	log "github.com/sirupsen/logrus"
 )
 
