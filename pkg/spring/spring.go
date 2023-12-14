@@ -160,6 +160,18 @@ func LoadDefaultDynamicWithEnv(env SpringEnv, ctx context.Context, propNames []s
 	return config, err
 }
 
+func LoadDefaultDynamicWithEnvIgnoringErrors(env SpringEnv, ctx context.Context, propNames []string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, error, []*yaml.KeyReadError) {
+	if env.ConfigDir == "" {
+		return nil, errors.New("could not find config directory"), nil
+	}
+
+	config, files, err, keyReadErrors := loadPropertiesIgnoringErrors(propNames, env.ConfigDir, env.profiles(), env.EnvMap)
+	if len(files) > 0 {
+		go watchConfigFiles(ctx, files, env.EnvMap, updateFn)
+	}
+	return config, err, keyReadErrors
+}
+
 func watchConfigFiles(ctx context.Context, files []string, envMap map[string]string, updateFn func(map[string]interface{}, error)) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -288,6 +300,43 @@ func loadProperties(propNames []string, confDir string, profiles []string, envMa
 	}
 	m, err := yaml.Resolve(propMaps, envMap)
 	return m, filePaths, err
+}
+
+func loadPropertiesIgnoringErrors(propNames []string, confDir string, profiles []string, envMap map[string]string) (map[string]interface{}, []string, error, []*yaml.KeyReadError) {
+	var propMaps []map[interface{}]interface{}
+	var filePaths []string
+	//first load the main props, i.e. gate.yml/yaml with no profile extensions
+	for _, prop := range propNames {
+		// yaml is "official"
+		config, filePath, err := loadPropertyFromFile(fmt.Sprintf("%s/%s", confDir, prop))
+		// file might have been unparsable
+		if err != nil {
+			return nil, filePaths, err, nil
+		}
+		if len(config) > 0 {
+			propMaps = append(propMaps, config)
+			filePaths = append(filePaths, filePath)
+		}
+	}
+
+	for _, prop := range propNames {
+		//we traverse the profiles array backwards for correct precedence
+		//for i := len(profiles) - 1; i >= 0; i-- {
+		for i := range profiles {
+			p := profiles[i]
+			pTrim := strings.TrimSpace(p)
+			config, filePath, err := loadPropertyFromFile(fmt.Sprintf("%s/%s-%s", confDir, prop, pTrim))
+			if err != nil {
+				return nil, filePaths, err, nil
+			}
+			if len(config) > 0 {
+				propMaps = append(propMaps, config)
+				filePaths = append(filePaths, filePath)
+			}
+		}
+	}
+	m, keyReadErrros := yaml.ResolveIgnoringErrors(propMaps, envMap)
+	return m, filePaths, nil, keyReadErrros
 }
 
 func loadPropertyFromFile(pathPrefix string) (map[interface{}]interface{}, string, error) {

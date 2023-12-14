@@ -18,6 +18,133 @@ type ObjectMap = map[interface{}]interface{}
 type StringMap = map[string]string
 type OutputMap = map[string]interface{}
 
+type KeyReadError struct {
+	key string
+	err error
+}
+
+func addKeyPrefix(keyReadErrors *[]*KeyReadError, prefix string) {
+	for _, kre := range *keyReadErrors {
+		kre.key = fmt.Sprintf("%s.%s", prefix, kre.key)
+	}
+}
+
+func processOneSubvalueFromArrayIgnoringErrors(fullMap OutputMap, subslice []interface{}, env StringMap, value interface{}, k int) []*KeyReadError {
+	var secret string
+	var decrypter secrets.Decrypter
+	var valueBytes []byte
+	key := fmt.Sprintf("[%d]", k)
+	switch value := value.(type) {
+	case map[string]interface{}:
+		keyReadErrors := subValuesIgnoringErrors(fullMap, value, env)
+		addKeyPrefix(&keyReadErrors, key)
+		return keyReadErrors
+	case []interface{}:
+		var keyReadErrors []*KeyReadError
+		for i := 0; i < len(value); i++ {
+			aux := processOneSubvalueFromArrayIgnoringErrors(fullMap, value[:], env, value[i], i)
+			addKeyPrefix(&aux, key)
+			keyReadErrors = append(keyReadErrors, aux...)
+		}
+		return keyReadErrors
+	case string:
+		if secrets.IsEncryptedSecret(value) {
+			var err error
+			if decrypter, err = secrets.NewDecrypter(context.TODO(), value); err != nil {
+				return []*KeyReadError{{key: key, err: err}}
+			} else if secret, err = decrypter.Decrypt(); err != nil {
+				return []*KeyReadError{{key: key, err: err}}
+			}
+			subslice[k] = secret
+			return []*KeyReadError{}
+		}
+		valueBytes = []byte(value)
+		valueBytes = re.ReplaceAllFunc(valueBytes, func(key []byte) []byte {
+			i := len(key) - 1
+			myKey := string(key[2:i])
+			return []byte(resolveSubs(fullMap, myKey, env))
+		})
+		value = string(valueBytes)
+		subslice[k] = value
+	}
+	return []*KeyReadError{}
+}
+
+func processOneSubvalueIgnoringErrors(fullMap OutputMap, subMap OutputMap, env StringMap, value interface{}, k string) []*KeyReadError {
+	var secret string
+	var decrypter secrets.Decrypter
+	var valueBytes []byte
+	switch value := value.(type) {
+	case map[string]interface{}:
+		keyReadErrors := subValuesIgnoringErrors(fullMap, value, env)
+		addKeyPrefix(&keyReadErrors, k)
+		return keyReadErrors
+	case []interface{}:
+		var keyReadErrors []*KeyReadError
+		for i := 0; i < len(value); i++ {
+			aux := processOneSubvalueFromArrayIgnoringErrors(fullMap, value[:], env, value[i], i)
+			addKeyPrefix(&aux, k)
+			keyReadErrors = append(keyReadErrors, aux...)
+		}
+		return keyReadErrors
+	case string:
+		if secrets.IsEncryptedSecret(value) {
+			var err error
+			if decrypter, err = secrets.NewDecrypter(context.TODO(), value); err != nil {
+				return []*KeyReadError{{key: k, err: err}}
+			} else if secret, err = decrypter.Decrypt(); err != nil {
+				return []*KeyReadError{{key: k, err: err}}
+			}
+			subMap[k] = secret
+			return []*KeyReadError{}
+		}
+		valueBytes = []byte(value)
+		valueBytes = re.ReplaceAllFunc(valueBytes, func(key []byte) []byte {
+			i := len(key) - 1
+			myKey := string(key[2:i])
+			return []byte(resolveSubs(fullMap, myKey, env))
+		})
+		value = string(valueBytes)
+		subMap[k] = value
+	}
+	return []*KeyReadError{}
+}
+
+func subValuesIgnoringErrors(fullMap OutputMap, subMap OutputMap, env StringMap) []*KeyReadError {
+	//responsible for finding all variables that need to be substituted
+	var keyReadErrors []*KeyReadError
+	for k, value := range subMap {
+		aux := processOneSubvalueIgnoringErrors(fullMap, subMap, env, value, k)
+		addKeyPrefix(&aux, k)
+		keyReadErrors = append(keyReadErrors, aux...)
+	}
+	return keyReadErrors
+}
+
+// Resolve takes an array of yaml maps and returns a single map of a merged
+// properties, toggeter with a list of key, errors unable to read.
+// The order of `ymlTemplates` matters, it should go from lowest
+// to highest precendence.
+func ResolveIgnoringErrors(ymlTemplates []ObjectMap, envKeyPairs StringMap) (OutputMap, []*KeyReadError) {
+	log.Debugf("Using environ %+v\n", envKeyPairs)
+	mergedMap := ObjectMap{}
+	for _, yml := range ymlTemplates {
+		if err := mergo.Merge(&mergedMap, yml, mergo.WithOverride); err != nil {
+			log.Error(err)
+		}
+	}
+	// unlike other secret engines, the vault config needs to be registered before it can decrypt anything
+	vaultCfg, err := extractVaultConfig(mergedMap)
+	if err == nil {
+		if err := secrets.RegisterVaultConfig(*vaultCfg); err != nil {
+			log.Errorf("Error registering vault config: %v", err)
+		}
+	}
+	stringMap := convertToStringMap(mergedMap)
+	keyReadErrors := subValuesIgnoringErrors(stringMap, stringMap, envKeyPairs)
+	return stringMap, keyReadErrors
+}
+
 // Resolve takes an array of yaml maps and returns a single map of a merged
 // properties.  The order of `ymlTemplates` matters, it should go from lowest
 // to highest precendence.
