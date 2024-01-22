@@ -97,20 +97,25 @@ func logFsStatError(err error, args ...interface{}) {
 	log.WithError(err).Error(args...)
 }
 
-//LoadProperties tries to do what spring properties manages by loading files
-//using the right precedence and returning a merged map that contains all the
-//keys and their values have been substituted for the correct value
+// LoadProperties tries to do what spring properties manages by loading files
+// using the right precedence and returning a merged map that contains all the
+// keys and their values have been substituted for the correct value
 //
-//Usage:
-//  If you want to load the following files:
-//    - spinnaker.yml/yaml
-//    - spinnaker-local.yml/yaml
-//    - gate-local.yml/yaml
-//    - gate-armory.yml/yaml
+// Usage:
+//
+//	If you want to load the following files:
+//	  - spinnaker.yml/yaml
+//	  - spinnaker-local.yml/yaml
+//	  - gate-local.yml/yaml
+//	  - gate-armory.yml/yaml
+//
 // Then For propNames you would give:
-//	  ["spinnaker", "gate"]
+//
+//	["spinnaker", "gate"]
+//
 // and you'll need to make sure your envKeyPairs has the following key pair as one of it's variables
-//    SPRING_PROFILES_ACTIVE="armory,local"
+//
+//	SPRING_PROFILES_ACTIVE="armory,local"
 func LoadProperties(propNames []string, configDir string, envKeyPairs []string) (map[string]interface{}, error) {
 	envMap := keyPairToMap(envKeyPairs)
 	profStr := envMap["SPRING_PROFILES_ACTIVE"]
@@ -163,7 +168,7 @@ func watchConfigFiles(ctx context.Context, files []string, envMap map[string]str
 			if !ok {
 				return
 			}
-			shouldRebuild := isAnyType(event, fsnotify.Write, fsnotify.Chmod, fsnotify.Rename)
+			shouldRebuild := isAnyType(event, fsnotify.Write, fsnotify.Rename)
 			log.Debugf("fs event %s, rebuilding config = %v", event.String(), shouldRebuild)
 			if shouldRebuild {
 				var cfgs []map[interface{}]interface{}
@@ -202,11 +207,14 @@ func isAnyType(event fsnotify.Event, _types ...fsnotify.Op) bool {
 //  2. /home/spinnaker/config
 //  3. /root/config
 //  4. HOME_DIR/.spinnaker
+//
 // Profiles:
-//  - armory
-//  - local
+//   - armory
+//   - local
+//
 // Env:
-//  Pulls os.Environ()
+//
+//	Pulls os.Environ()
 //
 // Specify propNames in the same way as LoadProperties().
 func LoadDefault(propNames []string) (map[string]interface{}, error) {
