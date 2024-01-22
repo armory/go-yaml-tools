@@ -181,7 +181,7 @@ func watchConfigFiles(ctx context.Context, files []string, envMap map[string]str
 			if !ok {
 				return
 			}
-			shouldRebuild := isAnyType(event, fsnotify.Write, fsnotify.Chmod, fsnotify.Rename)
+			shouldRebuild := isAnyType(event, fsnotify.Write, fsnotify.Rename)
 			log.Debugf("fs event %s, rebuilding config = %v", event.String(), shouldRebuild)
 			if shouldRebuild {
 				var cfgs []map[interface{}]interface{}
