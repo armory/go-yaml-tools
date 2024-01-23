@@ -218,17 +218,22 @@ func watchConfigFileWithDiff(ctx context.Context, file string, envMap map[string
 				return
 			}
 			shouldRebuild := isAnyType(event, fsnotify.Write, fsnotify.Chmod, fsnotify.Rename)
-			log.Debugf("fs event %s, computing checksum = %v", event.String(), shouldRebuild)
-			newSha, err := computeChecksum(file)
-			if err != nil {
-				log.Errorf("file %s had error %s", file, err.Error())
+			log.Debugf("fs event %s detected on file", event.String())
+
+			if shouldRebuild {
+				newSha, err := computeChecksum(file)
+				log.Debug("looking for file differences in", file)
+				if err != nil {
+					log.Errorf("file %s had error %s", file, err.Error())
+				}
+				if newSha == checksum {
+					shouldRebuild = false
+					log.Debugf("%s contents are identical, ignoring configuration reload.", file)
+				} else {
+					checksum = newSha
+				}
 			}
-			if newSha == checksum {
-				shouldRebuild = false
-				log.Debugf("%s contents are identical, ignoring", file)
-			} else {
-				checksum = newSha
-			}
+
 			if shouldRebuild {
 				var cfgs []map[interface{}]interface{}
 
