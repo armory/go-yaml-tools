@@ -2,12 +2,15 @@ package spring
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	yamlParse "gopkg.in/yaml.v2"
+	"io/ioutil"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -135,6 +138,12 @@ func LoadDefaultDynamic(ctx context.Context, propNames []string, updateFn func(m
 	return LoadDefaultDynamicWithEnv(env, ctx, propNames, updateFn)
 }
 
+func LoadDiffDynamic(ctx context.Context, propertiesFile string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, string, error) {
+	env := SpringEnv{}
+	env.initialize()
+	return LoadDiffDynamicWithEnv(env, ctx, propertiesFile, updateFn)
+}
+
 func LoadDefaultDynamicWithEnv(env SpringEnv, ctx context.Context, propNames []string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, error) {
 	if env.ConfigDir == "" {
 		return nil, errors.New("could not find config directory")
@@ -145,6 +154,55 @@ func LoadDefaultDynamicWithEnv(env SpringEnv, ctx context.Context, propNames []s
 		go watchConfigFiles(ctx, files, env.EnvMap, updateFn)
 	}
 	return config, err
+}
+
+func LoadDiffDynamicWithEnv(env SpringEnv, ctx context.Context, propertiesFile string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, string, error) {
+	if env.ConfigDir == "" {
+		return nil, "", errors.New("could not find config directory")
+	}
+
+	var checksum string
+
+	computeChecksum := func(filePath string) (string, error) {
+		data, err := ioutil.ReadFile(filePath)
+		if err != nil {
+			return "", err
+		}
+
+		hash := sha256.Sum256(data)
+		return hex.EncodeToString(hash[:]), nil
+	}
+
+	config, filePath, err := loadPropertyFromFile(fmt.Sprintf("%s/%s", env.ConfigDir, propertiesFile))
+	// file might have been unparsable
+	if err != nil {
+		return nil, "", err
+	}
+	// overwrite if there are profiles with higher hierarchy of the same file
+	profiles := env.profiles()
+	for i := range profiles {
+		p := profiles[i]
+		pTrim := strings.TrimSpace(p)
+		config, filePath, err = loadPropertyFromFile(fmt.Sprintf("%s/%s-%s", env.ConfigDir, propertiesFile, pTrim))
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	outputMap, err := yaml.Resolve([]yaml.ObjectMap{config}, env.EnvMap)
+	// Compute initial checksum
+	checksum, err = computeChecksum(filePath)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if len(filePath) > 0 {
+		go watchConfigFiles(ctx, []string{filePath}, env.EnvMap, updateFn)
+	}
+	return outputMap, checksum, err
+}
+
+func watchAndCompareFile(ctx context.Context, files []string, envMap map[string]string, updateFn func(map[string]interface{}, error)) {
+
 }
 
 func watchConfigFiles(ctx context.Context, files []string, envMap map[string]string, updateFn func(map[string]interface{}, error)) {
@@ -168,7 +226,7 @@ func watchConfigFiles(ctx context.Context, files []string, envMap map[string]str
 			if !ok {
 				return
 			}
-			shouldRebuild := isAnyType(event, fsnotify.Write, fsnotify.Rename)
+			shouldRebuild := isAnyType(event, fsnotify.Write, fsnotify.Chmod, fsnotify.Rename)
 			log.Debugf("fs event %s, rebuilding config = %v", event.String(), shouldRebuild)
 			if shouldRebuild {
 				var cfgs []map[interface{}]interface{}
