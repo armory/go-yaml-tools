@@ -10,7 +10,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	yamlParse "gopkg.in/yaml.v2"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -138,7 +137,7 @@ func LoadDefaultDynamic(ctx context.Context, propNames []string, updateFn func(m
 	return LoadDefaultDynamicWithEnv(env, ctx, propNames, updateFn)
 }
 
-func LoadDiffDynamic(ctx context.Context, propertiesFile string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, string, error) {
+func LoadDiffDynamic(ctx context.Context, propertiesFile string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, error) {
 	env := SpringEnv{}
 	env.initialize()
 	return LoadDiffDynamicWithEnv(env, ctx, propertiesFile, updateFn)
@@ -156,53 +155,98 @@ func LoadDefaultDynamicWithEnv(env SpringEnv, ctx context.Context, propNames []s
 	return config, err
 }
 
-func LoadDiffDynamicWithEnv(env SpringEnv, ctx context.Context, propertiesFile string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, string, error) {
+func LoadDiffDynamicWithEnv(env SpringEnv, ctx context.Context, propertiesFile string, updateFn func(map[string]interface{}, error)) (map[string]interface{}, error) {
 	if env.ConfigDir == "" {
-		return nil, "", errors.New("could not find config directory")
-	}
-
-	var checksum string
-
-	computeChecksum := func(filePath string) (string, error) {
-		data, err := ioutil.ReadFile(filePath)
-		if err != nil {
-			return "", err
-		}
-
-		hash := sha256.Sum256(data)
-		return hex.EncodeToString(hash[:]), nil
+		return nil, errors.New("could not find config directory")
 	}
 
 	config, filePath, err := loadPropertyFromFile(fmt.Sprintf("%s/%s", env.ConfigDir, propertiesFile))
 	// file might have been unparsable
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	// overwrite if there are profiles with higher hierarchy of the same file
 	profiles := env.profiles()
 	for i := range profiles {
 		p := profiles[i]
 		pTrim := strings.TrimSpace(p)
-		config, filePath, err = loadPropertyFromFile(fmt.Sprintf("%s/%s-%s", env.ConfigDir, propertiesFile, pTrim))
-		if err != nil {
-			return nil, "", err
+		profileConfig, profileFile, _ := loadPropertyFromFile(fmt.Sprintf("%s/%s-%s", env.ConfigDir, propertiesFile, pTrim))
+		if len(profileConfig) > 0 {
+			filePath = profileFile
+			config = profileConfig
 		}
 	}
 	outputMap, err := yaml.Resolve([]yaml.ObjectMap{config}, env.EnvMap)
-	// Compute initial checksum
-	checksum, err = computeChecksum(filePath)
+
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	if len(filePath) > 0 {
-		go watchConfigFiles(ctx, []string{filePath}, env.EnvMap, updateFn)
+		go watchConfigFileWithDiff(ctx, filePath, env.EnvMap, updateFn)
 	}
-	return outputMap, checksum, err
+	return outputMap, err
 }
 
-func watchAndCompareFile(ctx context.Context, files []string, envMap map[string]string, updateFn func(map[string]interface{}, error)) {
+func computeChecksum(filePath string) (string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
 
+	hash := sha256.Sum256(data)
+	return hex.EncodeToString(hash[:]), nil
+}
+
+func watchConfigFileWithDiff(ctx context.Context, file string, envMap map[string]string, updateFn func(map[string]interface{}, error)) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.WithError(err).Errorf("unable to watch any file")
+		return
+	}
+	defer watcher.Close()
+	checksum, _ := computeChecksum(file)
+	for {
+		if err = watcher.Add(file); err != nil {
+			log.WithError(err).Errorf("unable to watch file changes for %s", file)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			shouldRebuild := isAnyType(event, fsnotify.Write, fsnotify.Chmod, fsnotify.Rename)
+			log.Debugf("fs event %s, computing checksum = %v", event.String(), shouldRebuild)
+			newSha, err := computeChecksum(file)
+			if err != nil {
+				log.Errorf("file %s had error %s", file, err.Error())
+			}
+			if newSha == checksum {
+				shouldRebuild = false
+				log.Debugf("%s contents are identical, ignoring", file)
+			} else {
+				checksum = newSha
+			}
+			if shouldRebuild {
+				var cfgs []map[interface{}]interface{}
+
+				config, err := loadConfig(file)
+				if err != nil {
+					log.Errorf("file %s had error %s", file, err.Error())
+				}
+				cfgs = append(cfgs, config)
+				m, err := yaml.Resolve(cfgs, envMap)
+				updateFn(m, err)
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			log.Println("error:", err)
+		}
+	}
 }
 
 func watchConfigFiles(ctx context.Context, files []string, envMap map[string]string, updateFn func(map[string]interface{}, error)) {
